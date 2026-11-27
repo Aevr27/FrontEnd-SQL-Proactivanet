@@ -1610,7 +1610,7 @@ La firma NULL hoy no pesa: hay 0 en 383 214 tickets (4c).
 | X3 | **Default de fechas:** con NULL/NULL, los cuatro SP leen **todo el historial** (383 214 tickets desde 2025-01-01). La convención QARE del tablero (2.2) es de 15 días. | **D** | El frontend siempre debe mandar las dos fechas, o se ajustan los SP (requiere decisión) |
 | X4 | **Filtros distintos por bloque:** KPIs no recibe grupo ni técnico; Técnicos no recibe técnico; Categoría solo mueve el Detalle. | **D** (H18) | Si la pantalla tiene un filtro de grupo, las tarjetas no lo respetan y la barra y el Pareto sí: los números no cuadran entre bloques |
 | X5 | **Convención de filtros:** un solo valor `VARCHAR` con igualdad, contra la convención QARE de lista por comas (`fn_CorreoBacklog_SplitList`, 2.2). | **D** | Para elegir varios grupos habría que hacer una llamada por grupo y sumar, cosa que **no** debe hacerse con `COUNT(DISTINCT)`. O hay que ajustar los SP |
-| X6 | **El Detalle no devuelve `TipoClasificacionRespuesta`** (está comentado en el cuerpo). Para pintar "respuesta incompleta" el frontend tendría que saber que `PROBLEMA / NO SOLUCION` y `RESPUESTA SIN ACCION DOCUMENTADA` son de tipo `CALIDAD`. | **D** | Lógica de clasificación duplicada en el cliente, que se rompe si cambia el catálogo. Mejor exponer la columna en SQL |
+| X6 | **El Detalle no devuelve `TipoClasificacionRespuesta`** (script preparado: `sql/47`, 14.6) (está comentado en el cuerpo). Para pintar "respuesta incompleta" el frontend tendría que saber que `PROBLEMA / NO SOLUCION` y `RESPUESTA SIN ACCION DOCUMENTADA` son de tipo `CALIDAD`. | **D** | Lógica de clasificación duplicada en el cliente, que se rompe si cambia el catálogo. Mejor exponer la columna en SQL |
 | X7 | **El Detalle no devuelve `IdReglaClasificacion` ni `FraseClasificacion`** (comentados), así que la "Regla detectada" del mockup (3.5) no tiene fuente. | **D** | Exponerlas en SQL, o quitarlas del diseño |
 | X8 | **Orden de Técnicos:** solo `TicketsEvaluados DESC`, sin desempate. | **D** menor | Con empates el orden puede cambiar entre llamadas; el frontend no debe depender de él, o se agrega un desempate en SQL |
 | X9 | **`DECIMAL(10,2)`** en lugar del `DECIMAL(6,2)` de la convención QARE. | **D** menor | Ninguno: la escala sigue siendo 0-100 |
@@ -1624,6 +1624,16 @@ calidad + sin patrón; las etiquetas visuales del Detalle; y el rango de fechas
 inclusivo.
 
 ### 14.5 Qué consume el frontend y qué calcula
+
+**Arquitectura** (decisión del usuario, 2026-11-27):
+- Técnicos es una **pestaña nueva**, al mismo nivel que QA y QARE y en la misma
+  sección del tablero.
+- Tiene su propio frontend, su propio handler y sus propias consultas para los
+  cuatro SP.
+- Reutiliza solo la infraestructura general: navegación, carga de módulos,
+  conexión y componentes compartidos.
+- Los módulos QA y QARE (`qare/`, `App_Code/Qare*.cs`, `handlers/qare.ashx`),
+  que leen otros seis SP, **no se tocan**.
 
 **Consumir tal cual de SQL** (sin recalcular):
 
@@ -1647,3 +1657,42 @@ inclusivo.
 SQL si no se corrige: X6 (tipo de clasificación en el Detalle) y X4 / X5
 (filtros). Para esos casos, la recomendación es **ajustar SQL**, con la
 aprobación correspondiente, y **no** compensarlo en el frontend.
+
+### 14.6 `sql/47`: `TipoClasificacionRespuesta` en el Detalle (X6; preparado, NO aplicado en QA)
+
+Archivos: `sql/47_qare_detalle_tipo_clasificacion.sql` y su `_rollback.sql`.
+
+**Qué cambia.** En `usp_QARE_DetalleEvidencia`, partiendo del texto de
+`sql/46`, se agrega una coma tras `q.ClasificacionRespuesta` y se activa la línea
+`q.TipoClasificacionRespuesta`, que ya estaba comentada.
+- La columna sale de la vista: el SP no clasifica.
+- Toma los valores `PATRON_SOLUCION`, `CALIDAD` o `SIN PATRON`, y NULL si el
+  estado no es texto evaluable.
+- Va **al final** (columna 15): las 14 anteriores no cambian.
+- Usan `ALTER`, así que conservan los permisos. No tocan tablas, datos ni
+  catálogos.
+
+**Salvaguardas.** Las mismas que en `sql/46`:
+- Aprobación `47` / `47R`.
+- Precondición: el hash del Detalle tiene que ser el de `sql/46`, y la vista
+  tiene que tener la columna.
+- Transacción, postcondición, estado "antes/despues" y UTF-8 con BOM.
+
+**Pruebas en LocalDB.** Base desechable `QarePrueba_47` con los cuerpos
+originales más `sql/46`, que es el estado actual de QA. 92 tickets sintéticos.
+**No son cifras de QA.**
+
+| Validación | Resultado |
+|---|---|
+| Las 14 columnas anteriores, en 12 corridas (sin filtros, ventana, los 5 estados con etiqueta y valor interno, grupo, firma, categoría, clasificación e inicio > fin) | Iguales antes, con `sql/47` y tras el rollback (`EXCEPT` en los dos sentidos = 0). Mismas filas por corrida; inicio > fin sigue dando 50001 |
+| Columna nueva frente a la vista, ticket por ticket | 0 diferencias |
+| `CALIDAD` ⇔ la clasificación es un `Patron` `CALIDAD` activo; `SIN PATRON` ⇔ `SIN PATRON IDENTIFICADO`; NULL ⇔ el estado no es analizable | 0 fallas |
+| Distribución | Analizable: 9 `CALIDAD`, 11 `PATRON_SOLUCION`, 52 `SIN PATRON`; inválida 14 y sin información 6, todas NULL |
+| Rechazos | Se niega si el Detalle tiene el texto anterior a `sql/46` o si `sql/47` ya está aplicada. Una copia sin BOM leída como cp1252 y un `ALTER` que no compila se deshacen y el Detalle queda en `sql/46` |
+| Rollback | Hash igual al de `sql/46`; 14 columnas iguales a las de antes. Un segundo intento dice "no aplicada" |
+
+**Riesgo.** Quien capture el Detalle con `INSERT … EXEC` en una tabla de 14
+columnas falla (Msg 213) hasta agregar la 15. Se comprobó en LocalDB. En el repo,
+el único caso es `diag_qare_correcciones.sql` 4e (`#D`, `#D2`, `#D3`). No se
+sabe si en QA hay otros consumidores; hay que preguntarle a Daniela antes de
+aplicarlo. Quien lea por nombre de columna no se ve afectado.
