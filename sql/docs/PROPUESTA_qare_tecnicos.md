@@ -1425,9 +1425,19 @@ arregla su filtro.
 5. Medir el rendimiento de los cuatro SP con 15 y 90 días (12.4.7) antes de
    exponerlos.
 
-### 13.11 `sql/46`: correcciones 1-3 (aprobadas técnicamente el 2026-11-27, NO aplicadas en QA)
+### 13.11 `sql/46`: correcciones 1-3 (APLICADAS en QA el 2026-11-27 16:03)
 
-Aplicarlas en QA requiere una autorización explícita aparte.
+**Aplicación en QA** (salida de SSMS que compartió el usuario):
+- "Antes": los tres objetos estaban en `original de QA` y los hashes coincidían
+  con la precondición. Eso confirma que las copias de los cuerpos, incluido el
+  de KPIs armado desde 4a, eran el texto de QA sin contar los blancos.
+- Mensaje: `Migracion 46: aplicada. Los tres objetos tienen el texto esperado.`
+- "Despues": los tres objetos en `con sql/46`, con los hashes de la
+  postcondición.
+- La vista completa da 383 287 filas = 383 287 tickets.
+- El rollback (`46R`) sigue disponible y restauraría ese mismo texto.
+- No se volvieron a ejecutar los SP después de aplicarlo; esa verificación
+  está pendiente.
 
 Archivos: `sql/46_qare_correcciones_detalle_vista_kpis.sql` y
 `sql/46_qare_correcciones_detalle_vista_kpis_rollback.sql`. Usan `ALTER`, así que
