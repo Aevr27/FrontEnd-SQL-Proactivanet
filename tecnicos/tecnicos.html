@@ -1,0 +1,163 @@
+<!DOCTYPE html>
+<!--
+  tecnicos/tecnicos.html - Modulo Tecnicos (calidad de la respuesta abierta
+  QARE por tecnico). Pestaña propia dentro de Calidad de información, al lado
+  de QA y QARE e INDEPENDIENTE de las dos.
+
+  Mismo contrato de montaje que qa/ y qare/: este archivo es a la vez la
+  pagina suelta y la fuente de la pestaña "Técnicos" de dashboard.html.
+  TableroTecnicos (dashboard.js) trae este marcado, le quita <script> y
+  <link>, desarma el envoltorio #tab-tecnicos y lo monta en su contenedor.
+  Todos los ids llevan el prefijo "tec-" (tecnicos.js lo resuelve en $()).
+
+  Consume unicamente handlers/tecnicos.ashx. Los bloques y su origen:
+    KPIs                      dbo.usp_QARE_CalidadCaptura_KPIs
+    Barra de clasificacion    dbo.usp_QARE_PatronesSolucion, result set 3
+    Pareto de patrones        dbo.usp_QARE_PatronesSolucion, result set 2
+    Tabla por tecnico         dbo.usp_QARE_CalidadCaptura_Tecnicos
+    Evidencia                 dbo.usp_QARE_DetalleEvidencia
+
+  Filtro: solo el rango de fechas, que aceptan los cuatro SP. La busqueda, el
+  estado, el tecnico elegido y la paginacion de la evidencia trabajan sobre
+  las filas que ya llegaron; no piden nada nuevo al servidor.
+-->
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <meta name="color-scheme" content="light">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Tickets Proactivanet — Técnicos</title>
+  <!-- Solo para la pagina suelta: embebida, cada <script>/<link> se quita y
+       manda la copia del tablero. -->
+  <script src="../assets/vendor/chart.umd.min.js"></script>
+  <script src="../assets/js/escape.js"></script>
+  <script src="../assets/js/paleta.js"></script>
+  <script src="../assets/js/barras.js"></script>
+  <script src="../assets/js/grafica.js"></script>
+  <link rel="stylesheet" href="../assets/css/kpi.css">
+  <link rel="stylesheet" href="../assets/css/datos-info.css">
+  <script src="../assets/js/datos-info.js"></script>
+  <script src="../assets/js/refresco-auto.js"></script>
+  <link rel="stylesheet" href="../assets/css/kpis-fijos.css">
+  <script src="../assets/js/kpis-fijos.js"></script>
+  <link rel="stylesheet" href="../assets/css/boton.css">
+  <link rel="stylesheet" href="../dashboard.css">
+  <link rel="stylesheet" href="tecnicos.css">
+</head>
+<body>
+<div class="wrap">
+  <div id="tab-tecnicos" class="maintab-content active">
+
+    <header class="top">
+      <div>
+        <h1>Tickets Proactivanet — Técnicos</h1>
+        <p class="tec-sub">Calidad de la respuesta abierta QARE («descripción de la solución»), por técnico.</p>
+      </div>
+      <div class="acciones-top">
+        <button type="button" class="btn linea chico kpis-fijar" data-kpis-fijar="tec-kpis" aria-pressed="false" title="Mantener los KPIs de esta pestaña a la vista al bajar">Fijar KPIs</button>
+        <button type="button" class="btn linea chico" id="tec-btn-actualizar" title="Volver a consultar los datos con el mismo rango">Actualizar</button>
+        <div class="estado" id="tec-estado"></div>
+      </div>
+    </header>
+
+    <section class="filtros" id="tec-filtros">
+      <div class="campo">
+        <label for="tec-f-inicio">Fecha inicio</label>
+        <input type="date" id="tec-f-inicio">
+      </div>
+      <div class="campo">
+        <label for="tec-f-fin">Fecha fin</label>
+        <input type="date" id="tec-f-fin">
+      </div>
+      <div class="campo">
+        <label>Rango rapido</label>
+        <!-- Terminan HOY (dia de Mexico), incluido. 15 dias es la ventana con
+             la que abre, la misma de QARE. Maximo 93 dias. -->
+        <div class="rango-rapido">
+          <button class="btn linea chico" type="button" data-dias="15">15 dias</button>
+          <button class="btn linea chico" type="button" data-dias="30">30 dias</button>
+        </div>
+      </div>
+      <!-- Por que no hay Grupo ni Tecnico aqui: usp_QARE_CalidadCaptura_KPIs
+           solo acepta fechas, asi que las tarjetas no se moverian con ellos y
+           los bloques dejarian de cuadrar (sql/docs/PROPUESTA_qare_tecnicos.md
+           14.3-14.4, X4/X5). -->
+      <p class="tec-nota-filtros">
+        El rango de fechas (fecha de firma de la solución) aplica a todos los bloques.
+        Grupo y técnico no se ofrecen como filtro general: el procedimiento de los KPIs no los acepta.
+        Para ver la evidencia de un técnico, elígelo en su tabla.
+      </p>
+    </section>
+
+    <div class="tec-aviso tec-aviso-error" id="tec-error" hidden>
+      <strong>No se pudieron cargar los datos de Técnicos.</strong>
+      <span id="tec-error-msg"></span>
+      <button type="button" class="btn linea chico" id="tec-reintentar">Reintentar</button>
+    </div>
+    <!-- Diferencias con el contrato (una columna que no llego, un result set
+         de menos...). No bloquea nada. -->
+    <div class="tec-aviso" id="tec-avisos" hidden></div>
+
+    <section class="kpis" id="tec-kpis"></section>
+    <p class="tec-nota">Estos indicadores evalúan únicamente la pregunta abierta.</p>
+
+    <section class="card tec-seccion">
+      <h3>¿Qué encontramos en las respuestas analizables?<span class="hint" id="tec-hint-barra"></span></h3>
+      <div class="tec-barra-caja">
+        <div class="tec-barra" id="tec-barra" role="img" aria-label="Distribución de las respuestas analizables"></div>
+        <p class="tec-msg" id="tec-msg-barra">Calculando…</p>
+      </div>
+      <div class="tec-leyenda" id="tec-barra-leyenda"></div>
+      <p class="tec-nota">Respuesta incompleta: solo describe el problema o no documenta una acción. Sin patrón no significa contradicción.</p>
+    </section>
+
+    <section class="card tec-seccion">
+      <h3>Principales patrones de solución<span class="hint" id="tec-hint-pareto"></span></h3>
+      <div class="lienzo tec-lienzo-pareto">
+        <canvas id="tec-chart-pareto"></canvas>
+        <p class="tec-msg" id="tec-msg-pareto">Calculando…</p>
+      </div>
+    </section>
+
+    <section class="card tec-seccion">
+      <h3>Explorar por técnico<span class="hint" id="tec-hint-tecnicos"></span></h3>
+      <div class="tabla-alta tec-tabla-scroll" id="tec-tabla-tecnicos"><div class="vacio">Calculando…</div></div>
+    </section>
+
+    <section class="card tec-seccion">
+      <h3>Evidencia QARE · compara lo declarado con lo escrito</h3>
+      <div class="tec-evid-controles">
+        <label class="tec-campo">
+          <span>Buscar</span>
+          <input type="search" id="tec-f-buscar" placeholder="Ticket, texto, técnico…" autocomplete="off">
+        </label>
+        <label class="tec-campo">
+          <span>Estado</span>
+          <select id="tec-f-estado"><option value="">Todos los estados</option></select>
+        </label>
+        <label class="tec-campo">
+          <span>Filas por página</span>
+          <select id="tec-f-tamano">
+            <option value="25" selected>25</option>
+            <option value="50">50</option>
+            <option value="100">100</option>
+          </select>
+        </label>
+        <span class="tec-chip" id="tec-chip-firma" hidden>
+          <span id="tec-chip-firma-txt"></span>
+          <button type="button" id="tec-chip-firma-quitar" aria-label="Quitar el filtro de técnico">✕</button>
+        </span>
+      </div>
+      <div class="tec-tabla-scroll tec-evid-scroll" id="tec-tabla-evidencia"><div class="vacio">Calculando…</div></div>
+      <div class="paginador tec-paginador">
+        <button type="button" class="btn linea chico" id="tec-btn-prev">Anterior</button>
+        <span id="tec-paginacion-txt" class="paginacion-txt"></span>
+        <button type="button" class="btn linea chico" id="tec-btn-next">Siguiente</button>
+      </div>
+    </section>
+  </div>
+</div>
+
+<script src="tecnicos.js"></script>
+</body>
+</html>

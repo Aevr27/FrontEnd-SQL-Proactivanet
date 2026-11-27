@@ -41,7 +41,7 @@ Set-StrictMode -Version 2.0
 
 # Arbol del sitio: DASHBOARD.md seccion 5. Cambiar aqui y alli a la vez.
 $Raices = @('dashboard.html', 'dashboard.css', 'dashboard.js', 'assets', 'backlog', 'experiencia',
-            'qa', 'qare', 'analisis', 'concentracion', 'admin', 'handlers', 'App_Code')
+            'qa', 'qare', 'tecnicos', 'analisis', 'concentracion', 'admin', 'handlers', 'App_Code')
 
 # Panel de pruebas de Power Automate: solo localhost de desarrollo. Ninguna
 # funcionalidad real los usa (el handler y la clase van juntos).

@@ -179,6 +179,23 @@ function contenedorActivo() { return activos('.maintab-content'); }
   comprobar('QA solo se remide al volver', cuenta.qa.redimensionar, 5);
   comprobar('QARE solo se remide al volver', cuenta.qare.redimensionar, 5);
 
+  // Tecnicos: tercer modulo del grupo, carga perezosa (nada hasta su clic).
+  comprobar('Tecnicos: no se monta hasta su clic', cuenta.tecnicos.init, 0);
+  boton('.subnav-btn', 'tecnicos').click(); await esperar();
+  comprobar('Tecnicos: contenedor', contenedorActivo(), 'tab-tecnicos');
+  comprobar('Tecnicos: barra sigue en el grupo', activos('.mnav'), 'calidad');
+  comprobar('Tecnicos: selector marca Tecnicos', activos('.subnav-btn'), 'tecnicos');
+  comprobar('Tecnicos: hash del modulo', hash.valor, '#tecnicos');
+  comprobar('Tecnicos: montado al primer clic', cuenta.tecnicos.init, 1);
+  for (var t = 0; t < 3; t++) {
+    boton('.subnav-btn', 'qare').click(); await esperar();
+    boton('.subnav-btn', 'tecnicos').click(); await esperar();
+  }
+  comprobar('Tecnicos montado una sola vez', cuenta.tecnicos.init, 1);
+  comprobar('Tecnicos solo se remide al volver', cuenta.tecnicos.redimensionar, 3);
+  comprobar('QARE no se remonta al ir y volver desde Tecnicos', cuenta.qare.init, 1);
+  boton('.subnav-btn', 'qare').click(); await esperar();
+
   // --- Observabilidad -------------------------------------------------------
   boton('.mnav', 'observabilidad').click(); await esperar();
   comprobar('Observabilidad: abre Orquestacion la primera vez', contenedorActivo(), 'tab-orquestacion');
@@ -251,6 +268,9 @@ function contenedorActivo() { return activos('.maintab-content'); }
   comprobar('Backlog: barra marca backlog', activos('.mnav'), 'backlog');
 
   // --- hashes de siempre y alias de grupo ----------------------------------
+  api.activarTab('tecnicos'); await esperar();
+  comprobar('#tecnicos abre Tecnicos con su grupo marcado', contenedorActivo() + '|' + activos('.mnav') + '|' + selectorVisible() + '|' + activos('.subnav-btn'), 'tab-tecnicos|calidad|calidad|tecnicos');
+  comprobar('#tecnicos no remonta', cuenta.tecnicos.init, 1);
   api.activarTab('qa'); await esperar();
   comprobar('#qa abre QA con su grupo marcado', contenedorActivo() + '|' + activos('.mnav') + '|' + selectorVisible(), 'tab-qa|calidad|calidad');
   api.activarTab('tablero'); await esperar();
@@ -270,7 +290,7 @@ function contenedorActivo() { return activos('.maintab-content'); }
   comprobar('ningun init() repetido', claves.filter(function (n) { return cuenta[n].init > 1; }).join(','), '');
   comprobar('solo se montaron los que se abrieron',
     claves.filter(function (n) { return cuenta[n].init === 1; }).sort().join(','),
-    'analisis,backlog,concentracion,orquestacion,qa,qare,sla,tablero');
+    'analisis,backlog,concentracion,orquestacion,qa,qare,sla,tablero,tecnicos');
 
   console.log('');
   if (fallos) {

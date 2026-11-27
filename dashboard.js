@@ -4314,6 +4314,24 @@ const TableroQare = moduloEmbebido({
   refresco: refrescoDe('TableroQareModulo'),
 });
 
+/* Tecnicos: pestaña propia de Calidad de información, independiente de QA y
+   de QARE (otros SP, otro handler). Mismo trato de montaje: publica
+   window.TableroTecnicosModulo; al volver se remide el Pareto y el refresco
+   automatico repite la peticion a tecnicos.ashx con el mismo rango. */
+const TableroTecnicos = moduloEmbebido({
+  nombre: 'Técnicos',
+  base: 'tecnicos/',
+  id: 'tab-tecnicos',
+  pagina: 'tecnicos.html',
+  hoja: 'tecnicos.css',
+  guion: 'tecnicos.js',
+  alVolver: () => {
+    const modulo = window.TableroTecnicosModulo;
+    if (modulo) modulo.redimensionar();
+  },
+  refresco: refrescoDe('TableroTecnicosModulo'),
+});
+
 /* Analisis de servicios: mismo trato que QARE. El modulo publica
    window.TableroAnalisisModulo al arrancar y al volver a la pestaña solo se
    redibujan sus graficas si cambio el ancho; no se repite ninguna peticion a
@@ -4470,6 +4488,7 @@ const MODULOS = {
   efectividad: TableroEfectividad,
   qa: TableroQa,
   qare: TableroQare,
+  tecnicos: TableroTecnicos,
   analisis: TableroAnalisis,
   concentracion: TableroConcentracion,
   orquestacion: TableroOrquestacion,
@@ -4484,11 +4503,11 @@ const MODULOS = {
    entrada la primera vez; despues, el ultimo que se vio (`ultimoDeGrupo`,
    solo en memoria, como el estado de la barra). Ninguna clave de aqui puede
    ser tambien una clave de MODULOS: el hash #observabilidad, #calidad o
-   #servicios abre el grupo, y #tablero, #orquestacion, #qa, #qare,
+   #servicios abre el grupo, y #tablero, #orquestacion, #qa, #qare, #tecnicos,
    #analisis o #concentracion el modulo, como antes. */
 const GRUPOS = {
   observabilidad: ['orquestacion', 'tablero'],
-  calidad: ['qa', 'qare'],
+  calidad: ['qa', 'qare', 'tecnicos'],
   servicios: ['concentracion', 'analisis'],
 };
 const ultimoDeGrupo = {};

@@ -1,0 +1,125 @@
+/* =========================================================================
+   tecnicos/tecnicos.css - Lo PRIVADO de la pestaña Técnicos.
+
+   Como qare/qare.css: NO es hoja de pagina completa. .card, .kpi, .kpis,
+   .filtros, .lienzo, .hint, .vacio, .paginador, .tabla-alta y table/th/td
+   salen de dashboard.css y assets/css/kpi.css. Al montarse, moduloEmbebido
+   encierra esta hoja en @scope (#tab-tecnicos), asi que nada de aqui alcanza
+   a QA ni a QARE.
+   ========================================================================= */
+
+header.top #tec-estado:empty { display: none; }
+.tec-sub { margin: 4px 0 0; color: var(--muted); font-size: 13px; }
+
+.tec-nota-filtros {
+  flex-basis: 100%; margin: 4px 0 0; font-size: 12px; color: var(--muted);
+}
+.tec-nota { margin: 6px 2px var(--gap-bloque, 16px); font-size: 12px; color: var(--muted); }
+.card .tec-nota { margin: 10px 0 0; }
+
+/* ---- Avisos ---- */
+.tec-aviso {
+  background: #fffbeb; border: 1px solid #fde68a; color: #92400e;
+  border-left: 4px solid var(--ambr);
+  border-radius: var(--radius); padding: 11px 15px;
+  font-size: 12.5px; margin-bottom: var(--gap-bloque, 16px);
+}
+.tec-aviso-error {
+  background: #fdf4f2; border-color: #edd3cd; border-left-color: var(--rojo); color: var(--rojo);
+  display: flex; flex-wrap: wrap; gap: 8px 12px; align-items: center;
+}
+.tec-aviso[hidden] { display: none; }
+
+.tec-seccion { margin-bottom: var(--gap-bloque, 16px); }
+
+/* ---- Mensaje sobre un bloque (cargando / sin datos / error) ---- */
+.lienzo, .tec-barra-caja { position: relative; }
+.tec-msg {
+  position: absolute; inset: 0; margin: 0;
+  display: flex; align-items: center; justify-content: center; text-align: center;
+  padding: 12px; color: var(--muted); font-size: 13px;
+  background: rgba(255, 255, 255, .88);
+}
+.tec-msg[hidden] { display: none; }
+.tec-msg-error { color: var(--rojo); }
+.tec-vacio-error { color: var(--rojo); }
+
+/* ---- Barra segmentada: anchos = Pct* del SP ---- */
+.tec-barra-caja { min-height: 34px; }
+.tec-barra {
+  display: flex; height: 34px; border-radius: var(--radius-sm); overflow: hidden;
+  background: var(--line-soft);
+}
+.tec-seg { display: block; height: 100%; }
+.tec-seg-patron { background: #36aa3a; }
+.tec-seg-calidad { background: #d97706; }
+.tec-seg-sin { background: #9aa39a; }
+.tec-leyenda { display: flex; flex-wrap: wrap; gap: 8px 22px; margin-top: 10px; font-size: 13px; }
+.tec-ley { display: inline-flex; align-items: center; gap: 6px; }
+.tec-ley i { display: inline-block; width: 12px; height: 12px; border-radius: 3px; }
+.tec-ley-n { color: var(--muted); font-size: 12px; }
+
+/* ---- Pareto ---- */
+.lienzo.tec-lienzo-pareto { height: 400px; }
+@media (max-width: 700px) { .lienzo.tec-lienzo-pareto { height: 320px; } }
+
+/* ---- Tablas ---- */
+.tec-tabla-scroll { overflow-x: auto; }
+.tec-tabla-tec td.num, .tec-tabla-tec th.num { text-align: right; white-space: nowrap; font-variant-numeric: tabular-nums; }
+.tec-tabla-tec td.txt { min-width: 200px; }
+.tec-tabla-tec tbody tr { cursor: pointer; }
+.tec-tabla-tec tbody tr:hover td { background: var(--accent-soft, #f3f8ee); }
+.tec-tabla-tec tbody tr:focus-visible { outline: 2px solid var(--accent, #36aa3a); outline-offset: -2px; }
+.tec-tabla-tec tr.tec-fila-activa td { background: var(--accent-soft, #f3f8ee); font-weight: 600; }
+.tec-pct { display: block; font-size: 11px; color: var(--muted); font-weight: 400; }
+
+.tec-evid-controles { display: flex; flex-wrap: wrap; gap: 10px 16px; align-items: flex-end; margin-bottom: 12px; }
+.tec-campo { display: flex; flex-direction: column; gap: 4px; font-size: 12px; color: var(--ctrl-label, #1a3d1c); }
+.tec-campo input, .tec-campo select {
+  height: 36px; padding: 0 10px; border: 1px solid var(--ctrl-line, #cfe3c4);
+  border-radius: var(--radius-xs, 7px); background: var(--ctrl-bg, #fff); font: inherit; color: var(--ink);
+}
+.tec-campo input[type="search"] { min-width: 240px; }
+.tec-chip {
+  display: inline-flex; align-items: center; gap: 6px; padding: 6px 10px;
+  border-radius: var(--radius-pill, 999px); background: var(--accent-soft, #f3f8ee);
+  border: 1px solid var(--accent-line, #cfe3c4); font-size: 12.5px;
+}
+.tec-chip[hidden] { display: none; }
+.tec-chip button { border: 0; background: none; cursor: pointer; font-size: 13px; color: var(--muted); padding: 0 2px; }
+
+.tec-evid-scroll { max-height: 640px; overflow: auto; }
+.tec-tabla-evid thead th { position: sticky; top: 0; z-index: 1; }
+.tec-tabla-evid td { vertical-align: top; }
+.tec-col-exp { width: 34px; }
+.tec-exp {
+  width: 26px; height: 26px; border-radius: 6px; border: 1px solid var(--line);
+  background: #fff; cursor: pointer; font-size: 15px; line-height: 1;
+}
+.tec-ticket { white-space: nowrap; font-weight: 600; }
+/* La descripcion se recorta a tres lineas; completa, en la expansion. */
+.tec-desc {
+  min-width: 220px; max-width: 360px;
+  display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden;
+}
+.tec-sr { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+
+.tec-estado, .tec-tipo {
+  display: inline-block; padding: 2px 8px; border-radius: var(--radius-pill, 999px);
+  font-size: 11px; font-weight: 600; white-space: nowrap; background: var(--line-soft); color: var(--ink);
+}
+.tec-estado-ana { background: #e7f3ec; color: #166534; }
+.tec-estado-inv { background: #fce9e9; color: #991b1b; }
+.tec-estado-sin { background: #eef1ea; color: var(--muted); }
+.tec-tipo-patron { background: #e7f3ec; color: #166534; }
+.tec-tipo-calidad { background: #fdf3e3; color: #92400e; }
+.tec-tipo-sin { background: #eef1ea; color: var(--muted); }
+
+.tec-ctx td { background: #fafbf8; }
+.tec-ctx-lista { display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 8px 20px; margin: 4px 0; }
+.tec-ctx-lista dt { font-size: 11px; color: var(--muted); }
+.tec-ctx-lista dd { margin: 2px 0 0; font-size: 12.5px; overflow-wrap: anywhere; }
+.tec-ctx-largo { grid-column: 1 / -1; }
+.tec-ctx-largo dd { white-space: pre-wrap; }
+
+.tec-paginador { margin: 12px 0 0; }

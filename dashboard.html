@@ -219,6 +219,7 @@
   <nav class="subnav" data-grupo="calidad" aria-label="Calidad de información" hidden>
     <button class="subnav-btn" id="snav-qa" data-tab="qa" type="button">QA</button>
     <button class="subnav-btn" id="snav-qare" data-tab="qare" type="button">QARE</button>
+    <button class="subnav-btn" id="snav-tecnicos" data-tab="tecnicos" type="button">Técnicos</button>
   </nav>
   <nav class="subnav" data-grupo="servicios" aria-label="Servicios" hidden>
     <button class="subnav-btn" id="snav-concentracion" data-tab="concentracion" type="button">Vista general de servicios</button>
@@ -452,6 +453,13 @@
        pestaña: dashboard.html no pide nada a qare.ashx al cargar, y si el
        montaje o la API fallan el resto de las pestañas no se entera. -->
   <div id="tab-qare" class="maintab-content" role="region" aria-labelledby="snav-qare"></div>
+
+  <!-- ================================================== Tablero de Tecnicos
+       Contenedor vacio, como QARE pero INDEPENDIENTE de ella: TableroTecnicos
+       (dashboard.js) trae tecnicos/tecnicos.html, tecnicos.css y tecnicos.js
+       la primera vez que se abre la pestaña. Lee solo handlers/tecnicos.ashx
+       (los cuatro usp_QARE_* del prototipo de Daniela). -->
+  <div id="tab-tecnicos" class="maintab-content" role="region" aria-labelledby="snav-tecnicos"></div>
 
   <!-- ================================================ Analisis de servicios
        Contenedor vacio, como QARE. TableroAnalisis (dashboard.js) trae

@@ -115,6 +115,7 @@ var PESTANAS = [
   { pagina: 'experiencia/experiencia.html', tab: 'tab-experiencia', rejilla: 'kpis-exp' },
   { pagina: 'qa/qa.html', tab: 'tab-qa', rejilla: 'qa-kpis' },
   { pagina: 'qare/qare.html', tab: 'tab-qare', rejilla: 'qare-kpis' },
+  { pagina: 'tecnicos/tecnicos.html', tab: 'tab-tecnicos', rejilla: 'tec-kpis' },
   { pagina: 'analisis/analisis.html', tab: 'tab-analisis', rejilla: 'an-kpis' },
   { pagina: 'orquestacion/orquestacion.html', tab: 'tab-orquestacion', rejilla: 'orq-kpis' },
   { pagina: 'efectividad/efectividad.html', tab: 'tab-efectividad', rejilla: 'ef-kpis' }

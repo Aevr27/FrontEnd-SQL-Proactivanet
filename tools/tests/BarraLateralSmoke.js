@@ -108,7 +108,7 @@ Object.keys(GRUPOS).forEach(function (g) {
 comprobar('Observabilidad: botones con su rotulo',
   /data-tab="orquestacion"[^>]*>Orquestación<\/button>[\s\S]*?data-tab="tablero"[^>]*>Observabilidad<\/button>/.test(html), true);
 comprobar('Calidad de información: botones con su rotulo',
-  /data-tab="qa"[^>]*>QA<\/button>[\s\S]*?data-tab="qare"[^>]*>QARE<\/button>/.test(html), true);
+  /data-tab="qa"[^>]*>QA<\/button>[\s\S]*?data-tab="qare"[^>]*>QARE<\/button>[\s\S]*?data-tab="tecnicos"[^>]*>Técnicos<\/button>/.test(html), true);
 
 nombres.forEach(function (n) {
   var esGrupo = Object.prototype.hasOwnProperty.call(GRUPOS, n);

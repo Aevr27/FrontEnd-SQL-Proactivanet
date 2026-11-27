@@ -56,9 +56,9 @@ incremental mantiene actualizados los tickets modificados durante los últimos
 
 - `dashboard.html` / `dashboard.js` / `dashboard.css` — la página única con la
   barra lateral de pestañas: SLA y productividad, Backlog, Experiencia,
-  Efectividad, Calidad de información (QA y QARE), Análisis de servicios,
+  Efectividad, Calidad de información (QA, QARE y Técnicos), Análisis de servicios,
   Observabilidad (Observabilidad y Orquestación) y Call Center.
-- `backlog/`, `experiencia/`, `qa/`, `qare/`, `analisis/`, `orquestacion/` — cada pestaña
+- `backlog/`, `experiencia/`, `qa/`, `qare/`, `tecnicos/`, `analisis/`, `orquestacion/` — cada pestaña
   embebida; también abren como página suelta.
 - `assets/Tablero_Experiencia.html` — archivo generado (Observabilidad; su
   Orquestación y su Experiencia se esconden) que se muestra en Observabilidad dentro de un `<iframe>`;
@@ -204,7 +204,7 @@ Para desplegar el tablero se necesitan, entre otros (lista completa en
 
 ```text
 dashboard.html, dashboard.css, dashboard.js
-assets/  backlog/  experiencia/  qa/  qare/  analisis/  admin/
+assets/  backlog/  experiencia/  qa/  qare/  tecnicos/  analisis/  admin/
 handlers/
 App_Code/
 Web.config
@@ -278,6 +278,7 @@ Los archivos locales y configuraciones sensibles están excluidos mediante
 ├── orquestacion/          (pestaña; lee handlers/orquestacion.ashx, vistas del sql/77)
 ├── qa/
 ├── qare/
+├── tecnicos/             (pestaña de Calidad; lee handlers/tecnicos.ashx)
 ├── handlers/              (*.ashx)
 ├── App_Code/
 ├── sql/                   (migraciones numeradas NN_*.sql y sus _rollback)
