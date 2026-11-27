@@ -96,6 +96,59 @@ Si los patrones son frases sobre texto libre, hay que decidir:
 Recomendación: tabla de clasificación precalculada si el catálogo va a crecer o
 la regla es difusa; `LIKE` en SQL si son pocas frases exactas. Decisión del negocio.
 
+## 3b. Resultados del diag en QA (2026-11-27, ventana 2026-10-29 a 2026-11-27)
+
+`diag_qare_tecnicos_perfil.sql`, 9 310 tickets, una fila por ticket.
+
+**Resolutor**
+- `Tecnico` nunca viene vacío (103 distintos, 0 con U+FFFD).
+- `Tecnico` = `vw_Tickets.TecnicoSegundaLinea` sólo en 4 858 (52 %). En los
+  ejemplos distintos, `TecnicoSegundaLinea` es NULL o es otra persona y
+  `TecnicoAsignado` dice "Sin asignar". `Tecnico` es otra cosa; en la vista del SLA
+  (`DashboardQueries.cs`) es la firma de solución con respaldo en el asignado.
+  **Sin verificar para `vw_CorreoQA_Base`:** el cuerpo volvió truncado. diag 2, A y B.
+- Hay cuentas que no son personas: `User, Setup` (646 tickets, 25 grupos),
+  `Proactivanet, Customer Service`, `Lexmark, Proveedor`, `Soporte, Fenicia`...
+  `dbo.CatCuentaNoPersona` ya existe y la usan SLA y Análisis para sacarlas de lo
+  que habla de personas. Candidato a reutilizar en la tabla por técnico (diag 2, C).
+
+**Captura QARE**
+- 1 712 tickets (18.4 %) sin QARE: `QARe_TipoSolucion`, `AplicaOtrosCasos`,
+  `GenerarArticulo` y los textos vienen NULL juntos. Los cuatro campos libres
+  (`Causa`, `Evidencia`, `DescripcionSolucion`, `TipoSolucion`) se llenan juntos
+  (7 595 de 7 598): "incompleta" por campo vacío casi no distingue nada.
+- `QARe_UsuarioConfirmo` es NULL en el 100 %: no sirve para ninguna regla.
+- Largo de `QARe_DescripcionSolucion`: 31.9 % entre 1 y 9 caracteres, 17.2 % entre
+  10 y 19, 24.9 % entre 20 y 49; sólo 7.6 % llega a 50 o más.
+- Textos más repetidos: `.` 778, `N/A` 424, `NO` 274, `-` 245, `NO  SALE ERROR` 217
+  (parece respuesta a otra pregunta), `NA` 208, `0` 181, `SI` 147,
+  `SIN RESPUESTA` 121, guiones sueltos. Junto a eso, textos cortos con contenido
+  real repetido: `PERMISOS ADICIONALES TIENDA`, `CARGA DE PRECIOS`,
+  `SE REINICIA SERVICIOS DE EHUB`, `ALTA SAP TIENDA`: materia prima de un catálogo
+  de patrones.
+- 232 tickets copian `SolucionUsuario` tal cual; 36 copian el rótulo del tipo de
+  solución ("Se dan indicaciones, técnicamente no se hizo nada").
+
+**Respuesta declarada:** `QARe_TipoSolucion` es un catálogo cerrado de 11 valores,
+lleno siempre que hay captura. El más usado es "Se dan indicaciones, técnicamente
+no se hizo nada" (2 025).
+
+**Catálogo de patrones:** `CatCausaRaizAgrupador` cubre 105 de 9 310 (1.1 %) y
+`QARe_Causa` no empata nunca con él. **Descartado** como fuente de patrones.
+
+**Grupo / categoría:** siempre llenos; 48 grupos, 423 rutas de categoría.
+
+### Lo que cambia
+
+- La brecha 3.1 sigue abierta, pero ya hay datos para decidir. `diag_qare_tecnicos_perfil_2.sql`
+  (D1) cuenta una cascada **candidata** de "inválida": vacío, sin letras, literal
+  genérico, copia de otro campo, menos de 10 caracteres. Las reglas y la lista de
+  literales las aprueba el negocio.
+- El patrón no puede salir de un catálogo existente: hay que crearlo (3.5), sembrado
+  con los textos repetidos de 3b.
+- Por técnico: decidir si las cuentas de `CatCuentaNoPersona` salen de la tabla
+  (como en el SLA) o se muestran aparte.
+
 ## 4. Contrato propuesto (se aplica cuando 3.x esté resuelto)
 
 Parámetros comunes a los tres SP, mismos tipos y semántica que QARE:
@@ -164,10 +217,15 @@ Denominadores propuestos (a confirmar):
 8. ¿Las cinco columnas de la tabla por técnico son conteos o porcentajes? Si son
    porcentajes, ¿sobre qué total de ese técnico?
 
+9. ¿Las cuentas de `CatCuentaNoPersona` (`User, Setup`...) salen de la tabla por técnico?
+10. Los 1 712 tickets sin captura QARE: ¿son "inválidas" o un indicador aparte
+    ("sin captura")? Cambia el denominador de todo.
+
 ## 7. Siguiente paso
 
-1. Correr `sql/diag/diag_qare_tecnicos_perfil.sql` en QA y compartir la salida.
-2. Responder la sección 6 (con la salida del diag a la vista).
+1. ~~Correr `diag_qare_tecnicos_perfil.sql`~~ (hecho 2026-11-27, ver 3b). Correr
+   `sql/diag/diag_qare_tecnicos_perfil_2.sql` en QA y compartir la salida.
+2. Responder la sección 6 con D1/D2 del diag 2 a la vista.
 3. Con eso: escribir la TVF y los tres SP como `sql/NN_qare_tecnicos.sql` (+ rollback,
    `CREATE` sólo de objetos nuevos, sin tocar `usp_CorreoQARE_*`), script de
    validación con los invariantes de la sección 4 y ejemplos de ejecución.
