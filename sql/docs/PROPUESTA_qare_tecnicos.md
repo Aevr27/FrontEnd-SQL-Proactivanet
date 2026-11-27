@@ -1370,7 +1370,9 @@ cambios correctos. La que unificaba la firma NULL se quita: no tiene efecto.
 
 ### 13.8 Decisiones funcionales pendientes (Daniela)
 
-No se le preguntan todavía. Cada una va con sus ejemplos por ticket.
+Versión para Daniela: `PREGUNTAS_qare_daniela.md`, sanitizada (ejemplos resumidos,
+sin códigos ni texto de tickets). La versión con ejemplos por ticket está fuera
+del repositorio y se comparte solo por un canal interno autorizado.
 
 1. `ERROR` solo: ¿inválida, o `PROBLEMA / NO SOLUCION` como `ERROR DE USUARIO`?
    (H8; 1d)
