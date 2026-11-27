@@ -1358,7 +1358,7 @@ acuerdo.
 
 | Orden | Corrección | Hallazgo | Objeto | Impacto medido |
 |---|---|---|---|---|
-| 1 | Que el Detalle acepte el valor interno **y** la etiqueta en `@EstadoDescripcion` | H1 | `usp_QARE_DetalleEvidencia` | El filtro por la etiqueta pasa de 0 filas a 2 945 |
+| 1 | Que el Detalle acepte en `@EstadoDescripcion` el valor interno **y** las dos etiquetas visibles (`RESPUESTA INVALIDA`, `RESPUESTA ANALIZABLE`) | H1 | `usp_QARE_DetalleEvidencia` | El filtro por `RESPUESTA INVALIDA` pasa de 0 filas a 2 945; el de `RESPUESTA ANALIZABLE`, de 0 a 4 769 |
 | 2 | Unir las inválidas con `EXISTS` u `OUTER APPLY TOP (1)` en vez de `LEFT JOIN` | H2 | vista | 0 tickets hoy; evita duplicados futuros |
 | 3 | Validar inicio > fin en KPIs, como los otros tres | H16 | KPIs | 0 tickets |
 | 4 | Normalizar el texto en los niveles 2-4 **sin recortar el catálogo** | H4-H6, H22 | vista | 6 tickets ganan patrón y 2 pasan a inválida |
@@ -1425,7 +1425,9 @@ arregla su filtro.
 5. Medir el rendimiento de los cuatro SP con 15 y 90 días (12.4.7) antes de
    exponerlos.
 
-### 13.11 `sql/46`: correcciones 1-3 (preparadas, NO aplicadas en QA)
+### 13.11 `sql/46`: correcciones 1-3 (aprobadas técnicamente el 2026-11-27, NO aplicadas en QA)
+
+Aplicarlas en QA requiere una autorización explícita aparte.
 
 Archivos: `sql/46_qare_correcciones_detalle_vista_kpis.sql` y
 `sql/46_qare_correcciones_detalle_vista_kpis_rollback.sql`. Usan `ALTER`, así que
@@ -1436,7 +1438,7 @@ leído el 2026-11-27.
 
 | Objeto | Cambio | Lo que no cambia |
 |---|---|---|
-| `usp_QARE_DetalleEvidencia` | `@EstadoDescripcion` se traduce a `@EstadoInterno`: `RESPUESTA INVALIDA` → `NO EVALUABLE` y `RESPUESTA ANALIZABLE` → `TEXTO EVALUABLE`; cualquier otro valor pasa igual | Los parámetros, las columnas de salida, el orden y los demás filtros. Filtrar por el valor interno da lo mismo que antes |
+| `usp_QARE_DetalleEvidencia` | `@EstadoDescripcion` se traduce a `@EstadoInterno`. **Las dos etiquetas visibles quedan soportadas**: `RESPUESTA INVALIDA` → `NO EVALUABLE` y `RESPUESTA ANALIZABLE` → `TEXTO EVALUABLE`. `SIN INFORMACION QARE` ya era igual como etiqueta y como valor interno. Cualquier otro valor, incluidos los internos, pasa igual. La comparación no distingue mayúsculas (intercalación CI) | Los parámetros, las columnas de salida, el orden y los demás filtros. Filtrar por el valor interno da lo mismo que antes |
 | `vw_QARE_CalidadCaptura` | El `LEFT JOIN` a `CatQARE_RespuestaInvalida` pasa a ser un `EXISTS` dentro de `flags`, con la **misma** condición (`Campo`, `Activo`, `UPPER(LTRIM(RTRIM()))` en los dos lados) | Las columnas, la regla de solo signos, `CALIDAD` antes que patrón y el orden de las reglas (`Orden`, largo, `IdRegla`). `s` no se usaba en ningún otro lugar de la vista |
 | `usp_QARE_CalidadCaptura_KPIs` | Bloque `THROW 50001, 'La FechaInicio no puede ser mayor que la FechaFin.', 1` copiado de los otros tres SP | El cálculo, los filtros y el rango inclusivo |
 
@@ -1445,10 +1447,24 @@ leído el 2026-11-27.
   para el rollback). También corre en una base de prueba `QarePrueba_*`.
 - **Precondición:** el SHA2-256 de cada `OBJECT_DEFINITION`, sin espacios,
   tabuladores ni saltos de línea, tiene que coincidir con el del texto leído de
-  QA. Si Daniela cambió cualquiera de los tres objetos, el script no hace nada y
-  muestra los hashes que encontró.
+  QA. Si Daniela cambió cualquiera de los tres objetos, el script no hace nada.
+  La tabla "antes" muestra, para cada objeto, el `Estado` (`original de QA`,
+  `con sql/46`, `OTRO TEXTO` o `NO EXISTE`) y el hash encontrado, así que se ve
+  cuál difiere. El mensaje pide no forzar el script y volver a leer esa
+  definición.
 - Las tres modificaciones van en una sola transacción. La **postcondición**
-  compara los tres hashes finales; si alguno no coincide, se deshace todo.
+  compara los tres hashes finales; si alguno no coincide, se deshace todo. La
+  tabla "despues" se calcula **después** del `COMMIT` o del `ROLLBACK`, así que
+  muestra el estado real.
+- **Una ejecución parcial no deja objetos cambiados:**
+  - Un error de ejecución deshace la transacción (`XACT_ABORT`), y los lotes
+    siguientes no corren (`@@TRANCOUNT = 0` → `NOEXEC`).
+  - Un `ALTER` que no compila deja su objeto como estaba, y la postcondición
+    deshace los otros dos.
+  - Si se corta la conexión, SQL Server deshace la transacción abierta.
+  - Lo único que no se puede impedir es ejecutar un lote suelto (seleccionar
+    solo un `ALTER` en SSMS). Eso salta las comprobaciones, y el encabezado pide
+    ejecutar el archivo completo.
 - El archivo es UTF-8 con BOM, porque los comentarios de los cuerpos tienen
   acentos y entran en el hash.
 
@@ -1466,7 +1482,8 @@ se borró. A = cuerpos originales, B = con `sql/46`, C = después del rollback.
 | H3: inicio > fin | KPIs en A: una fila con ceros. En B: error 50001, con el mismo mensaje que el Detalle |
 | H3: rangos válidos (sin fechas, ventana, último día, solo inicio, solo fin) | KPIs iguales en A y B (0) |
 | Rollback | Hashes de C = A, y la vista, el Detalle y KPIs de C = A |
-| Rechazos | En otra base sin aprobación no se ejecuta nada. Con KPIs cambiado, con un estado parcial (solo la vista nueva) y con un segundo intento de migración o de rollback, se niega sin tocar nada. Una copia sin BOM leída como cp1252 falla en la postcondición y se deshace: los hashes quedan como en A |
+| Rechazos | En otra base sin aprobación no se ejecuta nada. Con KPIs cambiado (`Estado` = `OTRO TEXTO`), con un estado parcial (solo la vista nueva; `Estado` de la vista = `con sql/46`) y con un segundo intento de migración o de rollback, se niega sin tocar nada. Una copia sin BOM leída como cp1252 falla en la postcondición y se deshace: los hashes quedan como en A |
+| Falla a medias (inyectada en copias del script) | Un error de sintaxis en el `ALTER` del Detalle hace que la postcondición deshaga la vista y KPIs, que ya se habían modificado; "despues" muestra los tres como `original de QA`. Un `1/0` entre el segundo y el tercer `ALTER` deshace la transacción, KPIs no se ejecuta, los tres hashes quedan como en A y no queda ninguna transacción abierta |
 
 **Riesgos pendientes.**
 - La precondición depende de que los cuerpos que se leyeron de QA (salidas
@@ -1474,11 +1491,20 @@ se borró. A = cuerpos originales, B = con `sql/46`, C = después del rollback.
   en QA. Si el script se niega en QA, los hashes que muestra en "antes" dicen
   qué objeto difiere. Entonces hay que volver a leer ese cuerpo; no se debe
   forzar.
-- El texto de KPIs se armó a partir de las líneas de 4a, que omiten las líneas
-  en blanco. El hash ignora los blancos. El rollback devuelve el mismo texto sin
-  contar los blancos, pero no el mismo formato.
-- `RESPUESTA ANALIZABLE` cambia de 0 filas a las de texto evaluable. Es el mismo
-  defecto que H1, pero si la pantalla dependiera de recibir 0, cambia lo que ve.
+- **El rollback restaura la lógica original de los tres objetos.** Lo garantizan
+  los hashes, no la confianza en las copias:
+  - La migración solo se aplica si el hash de QA coincide con el de nuestra
+    copia, y el rollback termina solo si el hash final coincide con ese mismo
+    valor.
+  - Por lo tanto, después del rollback cada objeto tiene en QA exactamente los
+    mismos caracteres que tenía antes de `sql/46`, salvo los blancos.
+  - Las copias de la vista y del Detalle coinciden, sin blancos, con las salidas
+    `.rpt` de QA.
+  - El cuerpo de KPIs se armó desde las líneas de 4a, que omiten las líneas en
+    blanco. Su formato puede quedar distinto, pero no su código.
+- `RESPUESTA ANALIZABLE`: se mantiene por decisión del 2026-11-27, porque es el
+  mismo defecto de etiqueta frente a valor interno. Pasa de 0 filas a las de
+  texto evaluable. Si una pantalla dependiera de recibir 0, cambiaría lo que ve.
 - En una base sin los objetos de QA, `SET NOEXEC ON` no ejecuta nada, pero
   SQL Server igual compila el `ALTER VIEW` y muestra un error 208. En QA no pasa.
 - Los SP que leen la vista se recompilan en su siguiente ejecución.

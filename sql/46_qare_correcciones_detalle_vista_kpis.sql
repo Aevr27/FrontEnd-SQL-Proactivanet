@@ -35,9 +35,16 @@
 
    COMO CORRERLO (solo con OK), conectado a Tickets_Proactivanet:
        EXEC sys.sp_set_session_context N'aprobar_migracion', N'46';
-     y el script completo (SSMS o sqlcmd -f 65001). Una sola transaccion.
+     y el script COMPLETO (SSMS o sqlcmd -f 65001). Una sola transaccion.
+     Un lote suelto (p. ej. un ALTER seleccionado en SSMS) se salta las
+     comprobaciones: no ejecutar por partes.
      El archivo es UTF-8 con BOM: los cuerpos tienen acentos en comentarios
      y entran en el hash; abierto como cp1252 la postcondicion lo deshace.
+
+   SI FALLA A MEDIAS no queda ningun objeto cambiado: un error de ejecucion
+     deshace la transaccion (XACT_ABORT) y los lotes siguientes no corren
+     (@@TRANCOUNT = 0 => NOEXEC); un ALTER que no compila deja su objeto
+     como estaba y la postcondicion deshace los otros dos.
    ========================================================================= */
 IF DB_NAME() NOT LIKE N'QarePrueba[_]%'
    AND (DB_NAME() <> N'Tickets_Proactivanet'
@@ -61,8 +68,15 @@ DECLARE @kpis varbinary(32) = HASHBYTES('SHA2_256', REPLACE(REPLACE(REPLACE(REPL
     OBJECT_DEFINITION(OBJECT_ID('dbo.usp_QARE_CalidadCaptura_KPIs')) COLLATE Latin1_General_BIN2,
     N' ', N''), NCHAR(9), N''), NCHAR(13), N''), NCHAR(10), N''));
 
-SELECT Momento = 'antes', Objeto = v.Objeto, Hash = CONVERT(varchar(70), v.Hash, 1)
-FROM (VALUES ('vista', @vw), ('Detalle', @det), ('KPIs', @kpis)) AS v (Objeto, Hash);
+SELECT Momento = 'antes', v.Objeto,
+       Estado = CASE WHEN v.Hash IS NULL THEN 'NO EXISTE'
+                     WHEN v.Hash = v.HashPre THEN 'original de QA'
+                     WHEN v.Hash = v.HashPost THEN 'con sql/46'
+                     ELSE 'OTRO TEXTO (no es ni el original ni sql/46)' END,
+       Encontrado = CONVERT(varchar(70), v.Hash, 1)
+FROM (VALUES ('vista', @vw, 0x694ADEA4074727AAEF80C7D51C9869288E4F21913BA73D986B0F65492BC3FFDE, 0xB439CDAB6732CFF718E647DDC05453664DB0BEEB8312F6E290BC02DADFCF4C60),
+       ('Detalle', @det, 0xA550312C52A826D8393C3DD7699B02467DB55905DF55C6CB02C90574441AD0B3, 0x39AAF29386370C5BF87B2EE2843B4163907216C3809C501B0D5A8E8954FD3115),
+       ('KPIs', @kpis, 0x16BDA99F58438F35F2C8626A146DEBE1608E6A93D7D9894DF147D26854E6C9C2, 0xEBAECA25172A93B09E4DA8A3258D9301E89C6A7EB1C888A562B8696AF4B3D3B1)) AS v (Objeto, Hash, HashPre, HashPost);
 
 IF @vw = 0xB439CDAB6732CFF718E647DDC05453664DB0BEEB8312F6E290BC02DADFCF4C60 AND @det = 0x39AAF29386370C5BF87B2EE2843B4163907216C3809C501B0D5A8E8954FD3115 AND @kpis = 0xEBAECA25172A93B09E4DA8A3258D9301E89C6A7EB1C888A562B8696AF4B3D3B1
 BEGIN
@@ -74,7 +88,7 @@ ELSE IF @vw IS NULL OR @det IS NULL OR @kpis IS NULL
      OR @vw <> 0x694ADEA4074727AAEF80C7D51C9869288E4F21913BA73D986B0F65492BC3FFDE OR @det <> 0xA550312C52A826D8393C3DD7699B02467DB55905DF55C6CB02C90574441AD0B3 OR @kpis <> 0x16BDA99F58438F35F2C8626A146DEBE1608E6A93D7D9894DF147D26854E6C9C2
 BEGIN
     ROLLBACK TRANSACTION;
-    RAISERROR (N'Migracion 46: el texto de algun objeto no es el leido de QA (ver hashes "antes"). No se toca nada.', 16, 1);
+    RAISERROR (N'Migracion 46: el texto de algun objeto no es el leido de QA el 2026-11-27. Ningun objeto se modifico; la columna Estado de "antes" dice cual difiere. No forzar: volver a leer su definicion.', 16, 1);
     SET NOEXEC ON;
 END
 ELSE IF EXISTS (SELECT 1 FROM sys.sql_expression_dependencies
@@ -909,14 +923,34 @@ IF @vw IS NULL OR @det IS NULL OR @kpis IS NULL
    OR @vw <> 0xB439CDAB6732CFF718E647DDC05453664DB0BEEB8312F6E290BC02DADFCF4C60 OR @det <> 0x39AAF29386370C5BF87B2EE2843B4163907216C3809C501B0D5A8E8954FD3115 OR @kpis <> 0xEBAECA25172A93B09E4DA8A3258D9301E89C6A7EB1C888A562B8696AF4B3D3B1
 BEGIN
     ROLLBACK TRANSACTION;
-    RAISERROR (N'Migracion 46: el texto final no es el esperado (encoding del archivo?). Se deshizo todo.', 16, 1);
-    SET NOEXEC ON;
+    RAISERROR (N'Migracion 46: el texto final no es el esperado (un ALTER fallo, ver mensajes anteriores, o el archivo no se leyo como UTF-8). Se deshizo todo: los tres objetos quedan como estaban.', 16, 1);
 END
 ELSE
+BEGIN
     COMMIT TRANSACTION;
+    PRINT N'Migracion 46: aplicada. Los tres objetos tienen el texto esperado.';
+END;
 
-SELECT Momento = 'despues', Objeto = v.Objeto, Hash = CONVERT(varchar(70), v.Hash, 1)
-FROM (VALUES ('vista', @vw), ('Detalle', @det), ('KPIs', @kpis)) AS v (Objeto, Hash);
+-- Se vuelve a leer: tras un ROLLBACK los valores de arriba ya no son los vigentes.
+SET @vw = HASHBYTES('SHA2_256', REPLACE(REPLACE(REPLACE(REPLACE(
+    OBJECT_DEFINITION(OBJECT_ID('dbo.vw_QARE_CalidadCaptura')) COLLATE Latin1_General_BIN2,
+    N' ', N''), NCHAR(9), N''), NCHAR(13), N''), NCHAR(10), N''));
+SET @det = HASHBYTES('SHA2_256', REPLACE(REPLACE(REPLACE(REPLACE(
+    OBJECT_DEFINITION(OBJECT_ID('dbo.usp_QARE_DetalleEvidencia')) COLLATE Latin1_General_BIN2,
+    N' ', N''), NCHAR(9), N''), NCHAR(13), N''), NCHAR(10), N''));
+SET @kpis = HASHBYTES('SHA2_256', REPLACE(REPLACE(REPLACE(REPLACE(
+    OBJECT_DEFINITION(OBJECT_ID('dbo.usp_QARE_CalidadCaptura_KPIs')) COLLATE Latin1_General_BIN2,
+    N' ', N''), NCHAR(9), N''), NCHAR(13), N''), NCHAR(10), N''));
+
+SELECT Momento = 'despues', v.Objeto,
+       Estado = CASE WHEN v.Hash IS NULL THEN 'NO EXISTE'
+                     WHEN v.Hash = v.HashPre THEN 'original de QA'
+                     WHEN v.Hash = v.HashPost THEN 'con sql/46'
+                     ELSE 'OTRO TEXTO (no es ni el original ni sql/46)' END,
+       Encontrado = CONVERT(varchar(70), v.Hash, 1)
+FROM (VALUES ('vista', @vw, 0x694ADEA4074727AAEF80C7D51C9869288E4F21913BA73D986B0F65492BC3FFDE, 0xB439CDAB6732CFF718E647DDC05453664DB0BEEB8312F6E290BC02DADFCF4C60),
+       ('Detalle', @det, 0xA550312C52A826D8393C3DD7699B02467DB55905DF55C6CB02C90574441AD0B3, 0x39AAF29386370C5BF87B2EE2843B4163907216C3809C501B0D5A8E8954FD3115),
+       ('KPIs', @kpis, 0x16BDA99F58438F35F2C8626A146DEBE1608E6A93D7D9894DF147D26854E6C9C2, 0xEBAECA25172A93B09E4DA8A3258D9301E89C6A7EB1C888A562B8696AF4B3D3B1)) AS v (Objeto, Hash, HashPre, HashPost);
 
 SELECT Momento = 'despues', Filas = COUNT(*), Tickets = COUNT(DISTINCT CodigoTicket)
 FROM dbo.vw_QARE_CalidadCaptura;
