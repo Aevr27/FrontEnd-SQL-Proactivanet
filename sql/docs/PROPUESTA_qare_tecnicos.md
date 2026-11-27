@@ -1032,307 +1032,323 @@ El catálogo no dice si esas decisiones están aprobadas o son del prototipo.
 Fase de investigación previa a cualquier cambio en los objetos de Daniela. Nada de
 esta sección modifica la vista, los SP ni los catálogos.
 
-**De dónde salen los datos.** Esta sesión no alcanza QA: ninguna consulta nueva
-corrió en QA. Las cifras son de corridas anteriores en QA: los seis diag de las
-11:39-11:52 (salidas `.rpt` del 2026-11-27, antes de `sql/45`), el diag del
-prototipo de las 12:07 (12.7) y los conteos que se confirmaron después de `sql/45`
-(9 374 filas = 9 374 tickets). Cada cifra indica su fuente. Lo que falta medir lo
-cubre `sql/diag/diag_qare_correcciones.sql` (13.10), y donde falta queda dicho.
+**De dónde salen los datos.** De la corrida de `sql/diag/diag_qare_correcciones.sql`
+en QA (`Tickets_Proactivanet`, SQL Server 16.0.4255.1) el 2026-11-27 a las 15:23,
+con la ventana del 2026-10-29 al 2026-11-27, fin incluido. En esa ventana la vista
+dio **9 444 filas = 9 444 tickets**. La cifra de 9 374 que se dio tras `sql/45`
+era de la mañana; la diferencia son tickets que se firmaron durante el día (la
+última firma del historial es de las 13:18). Las referencias del tipo "(2c)" o
+"(3a)" señalan la sección del diag que da cada cifra. Las secciones 12.x son
+corridas anteriores y se citan solo cuando no se volvieron a medir.
 
-**Qué se ejecutó fuera de QA.**
-- Se releyeron los cuerpos de `vw_QARE_CalidadCaptura` y `usp_QARE_DetalleEvidencia`
-  (vienen de `diag_qare_objetos_fuentes.rpt`, sección 4). Los cuerpos de KPIs,
-  Técnicos y Patrones no se guardaron en disco; lo que se dice de ellos sale de
-  12.3b, y el diag nuevo los vuelve a imprimir (4a).
-- LocalDB (SQL 2025, base desechable `QareStub` ya borrada, datos sintéticos que
-  **no representan QA**): 1) se probó cómo comparan las intercalaciones los
-  caracteres invisibles; 2) se montó la vista y `usp_QARE_DetalleEvidencia` con su
-  cuerpo real, con stubs de los otros tres SP, y se corrió el diag nuevo completo
-  sin errores. El simulador de la sección 2 reprodujo la vista sin diferencias
-  (2a = 0), con una base `Latin1_General_CI_AS` y un tempdb
-  `SQL_Latin1_General_CP1_CI_AS`.
+**Validez del simulador.** El nivel 1 de la sección 2 reproduce la vista en
+**7 714 de 7 714** tickets evaluados, con 0 diferencias (2a). Los totales de 4d2,
+la salida de KPIs y la del Detalle coinciden campo por campo (4e: cuadre 0), y
+Patrones con `@Grupo` coincide con lo que se espera de la vista (4g). Ningún
+ticket de la vista quedó sin su fila de `vw_CorreoQARECierre_Base` y ninguno está
+duplicado.
+
+**Fuera de QA** solo se usó LocalDB (base desechable ya borrada, datos sintéticos)
+para probar el diag antes de correrlo. Esos resultados no son cifras de QA y no
+se citan como tales.
 
 ### 13.1 Resumen ejecutivo
 
-- **Errores confirmados (3).** a) El filtro `@EstadoDescripcion` de
-  `usp_QARE_DetalleEvidencia` compara contra el valor interno (`NO EVALUABLE`)
-  pero el SP devuelve la etiqueta visual (`RESPUESTA INVALIDA`). Si la pantalla
-  filtra con la etiqueta que muestra, recibe 0 filas (cuerpo real, probado en
-  LocalDB). b) El `LEFT JOIN` de la vista al catálogo de inválidas duplica
-  tickets cada vez que hay dos valores activos iguales. `sql/45` quitó el caso
-  `v`/`V`, pero la vista sigue igual de expuesta. c) La frase `CALIDAD` del
-  catálogo es `NO  SALE ERROR` con **dos** espacios. La vista compara por
-  igualdad exacta, así que `NO SALE ERROR` con un espacio no coincide.
-- **Problemas técnicos probables (4).** Comparan sin quitar caracteres de ancho
-  cero, con acentos, sin colapsar espacios y sin quitar signos finales. Cuántos
-  tickets cambia cada uno está por medir (13.9, sección 2). Lo que se sabe:
-  82 de 7 651 textos llenos traen ancho cero (12.4.2) y el catálogo ya duplica
-  frases por acento (12.4.1).
-- **Las cinco respuestas frecuentes sin patrón** se reparten en dos grupos.
-  `CARGA DE PRECIOS`, `ALTA SAP …` y `NAVEGACION` nombran el trabajo pero no la
-  acción: parecen rótulos de servicio. `SE BRINDA CONTACTO …` es canalización
-  sin acción. `ERROR` es una no-respuesta: el catálogo la tuvo como inválida y
-  está apagada. Clasificarlas es **decisión de Daniela**; 13.3 da la evidencia.
-- **Entre los SP**, la población (la vista) y el conteo (`COUNT(DISTINCT)`) son
-  iguales. Cambian los filtros (12.4.6), la exclusión de firma NULL (solo
-  Técnicos), la validación de fechas (KPIs no valida) y el denominador del
-  Pareto (todos los tickets con patrón, no solo el `@Top`). Algunas diferencias
-  son de diseño (13.6).
-- **Siguiente paso concreto:** correr `diag_qare_correcciones.sql` en QA. Sin esa
-  corrida no se puede elegir el nivel de normalización: su sección 2 es la
-  prueba de impacto que exige no fundir respuestas distintas.
+- **Errores confirmados en QA (2).** a) Al filtrar `usp_QARE_DetalleEvidencia`
+  por la etiqueta que el propio SP devuelve (`RESPUESTA INVALIDA`) salen
+  **0 filas**; con el valor interno (`NO EVALUABLE`) salen 2 945 (4e). b) La
+  vista une el catálogo de inválidas con un `LEFT JOIN` sin unicidad. Hoy no
+  duplica (9 444 = 9 444, y 383 214 = 383 214 en todo el historial), pero un
+  valor activo repetido vuelve a duplicar tickets, como pasó con `v`/`V`.
+- **Corrección de la versión anterior.** La propuesta decía que el `NO  SALE
+  ERROR` con doble espacio era un error, porque la variante con un espacio no
+  coincidiría. **No lo es:** el catálogo tiene las dos (Id 48 con un espacio y
+  Id 182 con dos, ambas activas; 1e), y los 218 tickets de QA usan el doble
+  espacio (3a).
+- **La normalización casi no mueve tickets.** Quitar invisibles, colapsar
+  espacios, ignorar acentos y quitar signos finales cambia, entre los cuatro
+  pasos, unos **11 tickets** de texto evaluable (2b): 8 por limpiar el texto y 3
+  por recortar una frase del catálogo (H22). Los 893 restantes del
+  paso 5 ya eran no evaluables: son textos de solo signos (`.`, `,`, `..`). Hay
+  83 textos con ancho cero y 282 con doble espacio, pero solo 2 de cada grupo
+  cambian de clasificación (2e/2e2). La normalización es correcta pero de baja
+  prioridad, y tiene una trampa (13.4).
+- **Lo que mueve la barra es el catálogo.** Con todas las reglas reactivadas,
+  *sin patrón* bajaría de 1 959 a 1 579, de 41.1 % a 33.1 % del texto evaluable
+  (2b, nivel 9). No conviene reactivarlas tal cual porque algunas atrapan de
+  más (13.5.5). Las cinco familias frecuentes ya tienen ejemplos por ticket y
+  contexto (13.3).
+- **Entre los SP** la población y el conteo coinciden. Las diferencias reales
+  son tres: KPIs no valida las fechas, el Detalle tiene el filtro por estado
+  roto y los filtros disponibles cambian de un SP a otro. La exclusión de firma
+  NULL (solo Técnicos) no afecta a ningún ticket: hay 0 firmas NULL en todo el
+  historial (4c).
+- **Siguiente cambio concreto:** las correcciones 1 y 2 de 13.7 (unir inválidas
+  sin duplicar y arreglar el filtro del Detalle). Están confirmadas en QA y no
+  dependen de ninguna decisión de negocio.
 
 ### 13.2 Tabla de hallazgos
 
 Categorías: **E** error confirmado · **P** problema técnico probable · **M** mejora
-sugerida · **D** decisión funcional pendiente (Daniela).
+sugerida · **D** decisión funcional pendiente (Daniela). Las cifras son tickets de
+la ventana salvo que se diga otra cosa.
 
-| # | Hallazgo | Cat. | Evidencia | Tickets (ventana) | Sección |
+| # | Hallazgo | Cat. | Evidencia en QA | Tickets | Sección |
 |---|---|---|---|---|---|
-| H1 | Filtro de estado del Detalle espera el valor interno y muestra la etiqueta | E | Cuerpo real; LocalDB: etiqueta = 0 filas, valor interno = todas | Todos los filtros por estado | 13.6 |
-| H2 | `LEFT JOIN` a inválidas sin unicidad: un duplicado activo duplica tickets | E | Ocurrió con `v`/`V` (9 375 / 9 374) | 0 hoy | 13.6 |
-| H3 | `NO  SALE ERROR` (doble espacio) en el catálogo; la variante de un espacio no coincide | E | Catálogo 12.7; vista: igualdad exacta | 218 coinciden; variantes de un espacio: pendiente (3a) | 13.5.1 |
-| H4 | Ancho cero (U+200B/C/D) no se quita: el texto no coincide con su regla | P | 82 textos con ancho cero (12.4.2); en `Latin1_General_CI_AS` no se ignoran (LocalDB) | ≤ 82; cambio real: 2c/2e2 | 13.4 |
-| H5 | Acentos: la colación `CI_AS` los distingue; el catálogo duplica frases | P | `CODIGO`/`CÓDIGO CRUZADO`; `NAVEGACION` con 2 escrituras (32 tickets) | pendiente (2c, paso 3->4) | 13.4 |
-| H6 | Espacios repetidos internos no se colapsan | P | H3; `SIN  RESPUESTA…` posible | pendiente (2c, paso 2->3) | 13.4 |
-| H7 | Signos finales (`.`, `,`) impiden la igualdad exacta | P | Mecanismo de la vista | pendiente (2c, paso 4->5) | 13.4 |
-| H8 | `ERROR` es evaluable porque la fila `error` está inactiva | D | 74 tickets; `ERROR` aparece además 150 veces como `QARe_Evidencia` | 74 | 13.3.1 |
-| H9 | Reglas apagadas dejan sin patrón frases frecuentes | D | `CARGA DE`, `ALTA SAP`, `NAVEGACION`, `CONTACTO` inactivas (12.4.9) | ≈ 193 (suma de 12.4.9) | 13.3 |
-| H10 | `NO SALE ERROR` se clasifica como problema y no como inválida | D | Regla `CALIDAD`; 3 firmas concentran el 96 % de esa familia | 218 | 13.5.1 |
-| H11 | Igualdad (`CALIDAD`) contra contención (`PATRON`): el mismo contenido cae distinto según lo que lo rodee | D/M | `NUEVA CONTRASEÑA` frente a `SE ANEXA NUEVA CONTRASEÑA` (18) | pendiente (3c) | 13.5.3 |
-| H12 | Cuatro tratos de "sin respuesta del usuario" | D | 121 inválida, 40 `CALIDAD`, patrón por `LIKE`, 7 sin patrón | ≥ 168 | 13.5.4 |
-| H13 | Copiar el rótulo del tipo de solución cuenta como patrón | D | 66-67 tickets copian el tipo (Q1; evidencia 5a) | 66-67 | 13.5.2 |
-| H14 | `PATRON` por `LIKE` sin límite de palabra y con raíces cortas | M | 12.4.4; frases cortas que ganan a largas: 2g | pendiente (2g) | 13.4 |
-| H15 | `PalabraClave` se usa como patrón `LIKE` sin escapar `_`, `%` ni `[` | P | Mecanismo; LocalDB: `ALTA_SAP` coincide con `ALTAXSAP` | pendiente (2f) | 13.4 |
-| H16 | KPIs no valida `@FechaInicio > @FechaFin`; los demás sí | M | 12.3b | — | 13.6 |
-| H17 | Técnicos excluye `FirmaSolucion IS NULL`; KPIs no | M | 12.3b; 0 firmas NULL en la ventana (12.5) | 0 hoy; todo el historial: 4c | 13.6 |
-| H18 | Filtros distintos por SP: Categoría y Técnico solo mueven el Detalle | D | 12.4.6 | — | 13.6 |
-| H19 | Cuentas no persona y proveedores no se excluyen | D | 753 de 4 cuentas del catálogo + 457 de 11 proveedores (12.5) | 1 210 | 13.6 |
-| H20 | `QARe_Evidencia` repite la descripción en el 62 % de los casos | D | 4 753 de 7 625 con evidencia (`diag_qare_evidencia` 4) | 4 753 | 13.3 |
+| H1 | El filtro de estado del Detalle espera el valor interno y muestra la etiqueta | E | 4e: etiqueta = 0 filas, valor interno = 2 945 | todo filtro por estado | 13.6 |
+| H2 | `LEFT JOIN` a inválidas sin unicidad | E | Ocurrió con `v`/`V`; hoy filas = tickets | 0 hoy | 13.6 |
+| H3 | ~~La variante de `NO SALE ERROR` con un espacio no coincide~~ **Descartado**: el catálogo tiene las dos variantes | — | 1e (Id 48 y 182), 3a | 0 | 13.5.1 |
+| H4 | El ancho cero no se quita y la columna no lo ignora | P | 0b: U+200B/U+200C ≠ texto limpio; 83 textos con ancho cero, 71 al inicio (2e) | 2 (2e2) | 13.4 |
+| H5 | Los acentos se distinguen (`SQL_Latin1_General_CP1_CI_AS`) | P | 0c: `NAVEGACIÓN` ≠ `NAVEGACION`; 52 claves del catálogo coinciden al quitar acentos (2f) | 6 (2e2) | 13.4 |
+| H6 | Los espacios repetidos internos no se colapsan | P | 282 textos con doble espacio (2e) | 2 (2e2) | 13.4 |
+| H7 | Los signos finales impiden la igualdad exacta | P | 1 425 textos terminan en signo (2e) | 2 fuera de los de solo signos (2d) | 13.4 |
+| H8 | `ERROR` solo es evaluable porque la inválida `error` está inactiva | D | Id 39 inactiva (1e, 3d3); 50 de 74 son de un grupo de accesos que lo usa como "error de usuario / no corresponde" (1c, 1d) | 74 | 13.3 |
+| H9 | Reglas inactivas dejan sin patrón frases frecuentes | D | `CARGA DE`, `ALTA SAP`, `NAVEGACION`, `CONTACTO` inactivas (1e, 3d2) | 231 en las 4 familias (1b) | 13.3 |
+| H10 | `NO SALE ERROR` es `PROBLEMA / NO SOLUCION`, pero la solución al usuario dice que se hicieron ajustes | D | 218 tickets, 217 de un grupo, 207 con tipo "se dan indicaciones" (3a2, 3a3) | 218 | 13.5.1 |
+| H11 | `CALIDAD` exige el texto completo; con contención el resultado cambia regla por regla | D/M | 3c: `FAVOR DE VALIDAR` 0 exactos y 58 parciales; `MATERIALES SIN PMV` 46 exactos | según regla | 13.5.3 |
+| H12 | "Sin respuesta" tiene tres destinos distintos | D | 123 inválida, 40 `CALIDAD`, 11 sin patrón (3e) | 174 | 13.5.4 |
+| H13 | Copiar el rótulo del tipo de solución cuenta como patrón | D | 66 iguales, 25 truncados, 15 que empiezan con el tipo; los 106 son patrón (3b) | 106 | 13.5.2 |
+| H14 | `PATRON` por `LIKE` con raíces cortas y `Orden` por encima del largo | M | 2g: `CONFIGUR` (Orden 50) gana a frases de `SEGURIDAD` (130) | 3 | 13.4 |
+| H15 | `PalabraClave` entra a `LIKE` sin escapar | M | 0c: `_` actúa de comodín en QA; ninguna frase del catálogo tiene `_ % [` (2f) | 0 hoy | 13.4 |
+| H16 | KPIs no valida `@FechaInicio > @FechaFin`; los otros tres sí | M | 4a | — | 13.6 |
+| H17 | Técnicos excluye firma NULL; los demás no | M | 4a; 0 firmas NULL en 383 214 tickets (4c) | 0 | 13.6 |
+| H18 | Los filtros cambian por SP: Categoría y Técnico solo mueven el Detalle | D | 4a, 4b | — | 13.6 |
+| H19 | No se excluyen las cuentas no persona ni los proveedores | D | 759 tickets de cuentas del catálogo en la ventana (4d2); salen como filas en Técnicos (4f) | 759 + proveedores | 13.6 |
+| H20 | `QARe_Evidencia` repite la descripción | D | 4 753 de 7 625 (`diag_qare_evidencia` 4, no se volvió a medir); en las 5 familias es lo común (1d) | 4 753 | 13.3 |
+| H21 | Las inválidas se concentran en pocas firmas | D | 12 firmas con ≥ 50 evaluados y ≥ 90 % no evaluable suman 1 537 de 2 945 (4f) | 1 537 | 13.6 |
+| H22 | Normalizar el catálogo con `TRIM` amplía la regla `' SQL'` | P | 2c/2d: `MYSQL` pasa a `BASE DE DATOS / DML` en el paso 1->2 por el espacio inicial de la Id 9 | 3 | 13.4 |
 
 ### 13.3 Respuestas frecuentes sin patrón
 
-Las cifras vienen de `diag_qare_patrones.rpt` (claves normalizadas: mayúsculas,
-blancos y signos a espacio, comparación sin acentos) y de 12.4.9 (texto
-`UPPER(TRIM)`). Las dos normalizaciones dan conteos algo distintos para la misma
-frase: 47 contra 48 en `CARGA DE PRECIOS`.
+Las familias agrupan por contenido, sin acentos y en mayúsculas (1a, 1b). "Sin
+patrón" son los tickets que hoy terminan en `SIN PATRON IDENTIFICADO`.
 
-| Frase (variantes) | Tickets | Escrituras | Firmas | Grupos | Regla del catálogo | Resultado hoy |
+| Familia | Sin patrón | Escrituras | Grupo dominante | Categoría dominante | Tipo de solución dominante | Regla del catálogo |
 |---|---|---|---|---|---|---|
-| `ERROR` | 74 | — | — | — | Inválida `error`, **inactiva** | Texto evaluable, sin patrón |
-| `CARGA DE PRECIOS` / `SP CARGA DE PRECIOS` | 47 + 24 | 1 + 1 | 5 / 2 | 4 / 2 | `CARGA DE` (`CARGA / SINCRONIZACION`), **inactiva** | Sin patrón |
-| `ALTA SAP TIENDA` / `ALTA SAP OAT` | 31 + 25 | 1 + 1 | 2 / 2 | 1 / 1 | `ALTA SAP`, **inactiva** | Sin patrón |
-| `SE BRINDA CONTACTO PARA (SU) SEGUIMIENTO` (+ `CONTACTOSD` 6) | 33 + 6 | 2 + 1 | 3 (en la de 32) / 2 | 2 / 2 | `CONTACTO` (`INDICACIONES / CANALIZACION`), **inactiva** | Sin patrón |
-| `NAVEGACION` / `NAVEGACIÓN` | 32 | 2 | 3 | 2 | `NAVEGACION`, **inactiva** | Sin patrón |
+| `ERROR` exacto | 74 (46 `ERROR`, 26 `error`, 2 `Error`) | 3 | Control de Accesos TI (50) | Accesos / Aplicativos legados (44) | Se dan indicaciones (51) | Inválida `error` Id 39, **inactiva** |
+| `CARGA DE PRECIO(S)` | 90 (+3 ya en `REINICIO`) | 13 | End User (89) | Básculas / Ticket serializado (67) | Reinicio de servicio (41), acción al sistema (34) | `CARGA DE` Id 35 → `CARGA / SINCRONIZACION`, **inactiva** |
+| `ALTA SAP TIENDA` / `OAT` | 57 | 2 | Control de Accesos TI (57) | SAP / Alta, Baja, Cambios (54) | Se otorgan permisos (50) | `ALTA SAP` Id 84 → `CUENTAS / CREDENCIALES`, **inactiva** |
+| `… BRINDA … CONTACTO …` | 48 | 4 | Service Desk (46) | Varias de Punto de Venta y Chrome | Se dan indicaciones (39) | `CONTACTO` Id 30 → `INDICACIONES / CANALIZACION`, **inactiva** |
+| `NAVEGACION` | 36 (+2 `NAVEAGCION`) | 6 | Seguridad Informática (30) | Usuario de red / Permisos de navegación (28) | Se otorgan permisos (34) | `NAVEGACION` Id 46 → `SEGURIDAD / CONECTIVIDAD`, **inactiva** |
 
-Lectura:
+Lectura por familia (con los ejemplos por ticket de 1d):
 
-1. **Concentración:** cada frase sale de 2 a 5 firmas y de 1 a 4 grupos. Las dos
-   de `ALTA SAP` salen de **un solo grupo**. El texto se repite idéntico, sin
-   variantes de redacción: es un rótulo que el técnico escribe por costumbre,
-   no una descripción.
-2. **Copiado en la evidencia:** las mismas frases aparecen como `QARe_Evidencia`
-   (`ERROR` 150, `CARGA DE PRECIOS` 64, `SE BRINDA CONTACTO PARA SEGUIMIENTO` 32,
-   `ALTA SAP TIENDA` 26, `ALTA SAP OAT` 24). En general la evidencia repite la
-   descripción en 4 753 de 7 625 tickets (H20). Un "patrón" sacado de esta
-   descripción no es independiente de la evidencia.
-3. **Sin verbo de acción:** el diag de calidad (sección 5) marca `CARGA DE
-   PRECIOS`, `NAVEGACION` y `ALTA SAP …` sin verbo; `NAVEGACION` y `SE BRINDA
-   CONTACTO PARA SEGUIMIENTO`, además, sin palabra de problema (6b).
-4. **Lo que cada una parece ser** (propuesta, no decisión):
+- **`ERROR`.** En el grupo de accesos, la solución al usuario es siempre "el tema
+  que reportas no corresponde a Control Accesos TI" y la causa declarada es
+  "Error de usuario" (50 de 74). En App Evolución (21) la solución es "muchas
+  gracias por su respuesta… Vo.Bo." y el tipo es "no fue necesario hacer nada".
+  En los dos casos `ERROR` es una abreviatura de la causa, no de la solución. El
+  catálogo ya trata `ERROR DE USUARIO` (Id 55) como `CALIDAD` `PROBLEMA / NO
+  SOLUCION`. Aparte, hay 42 tickets con 32 textos que empiezan con `ERROR`
+  (`Error en material`, `Error en pedido`…): nombran el problema y no la
+  solución, y tampoco tienen patrón.
+- **`CARGA DE PRECIOS`.** La solución al usuario dice "se envía actualización de
+  precios"; encaja en `CARGA / SINCRONIZACION`. La raíz `CARGA DE` atraparía de
+  más: con todas las reglas activas, `CARGA DE PAGINA`, `CARGA DE IMAGEN` y
+  `CARGA DE BASCULAS` también entrarían (2d, 1->9). `CARGA DE PRECIO`, sin la
+  `S`, cubre las 13 escrituras.
+- **`ALTA SAP …`.** Viene entera de un grupo y de una categoría. En 50 tickets el
+  alta se hizo ("se realiza el alta del usuario"). En 7 no: "las altas de tienda
+  se realizan mediante SorIA", con tipo "se dan indicaciones". El rótulo no
+  distingue entre los dos casos. Las reglas activas `ALTA DE USUARIO SAP` y
+  `ALTA USUARIO SAP` no coinciden porque el texto no dice `USUARIO`.
+- **`SE BRINDA CONTACTO …`.** Es canalización: la solución al usuario da el
+  contacto con el que se lleva el seguimiento. La raíz `CONTACTO` atraparía 85
+  tickets sin patrón, entre ellos `CONFIRMA CONTACTO DE TIENDA`, que no es
+  canalización (3d). Hay formas vecinas sin patrón: `SE ADJUNTAN CONTACTOS`
+  (15), `SE PROPORCIONA CONTACTO.` (9) y `SE LE BRINDA INFORMACIÓN PARA PONERSE
+  EN CONTACTO CON OTRO EQUIPO` (8) (2d).
+- **`NAVEGACION`.** En Seguridad Informática significa "se otorgó el permiso de
+  navegación". Su regla inactiva lo mandaba a `SEGURIDAD / CONECTIVIDAD`, pero
+  las frases activas `PERMISO DE NAVEGACION` y `PERMISOS DE NAVEGACION` van a
+  `ROLES / PERMISOS` (1e). Los 10 de Service Desk son otra cosa: borrado de
+  caché y temporales del navegador.
 
-   | Frase | Lectura técnica | Por qué no se clasifica sola |
-   |---|---|---|
-   | `ERROR` | No-respuesta, como `NA` o `SIN RESPUESTA` | La fila existió y alguien la apagó. Puede haber motivo: hay `ERROR TIENDA` (6), `ERROR OPERATIVO` (5) y `ERROR EN FACTURA` (4), que sí dicen algo. Activarla solo atrapa el texto exacto. |
-   | `CARGA DE PRECIOS` | Nombra la tarea (carga de precios a báscula o caja), no si se hizo | Hay variantes completas: `SE MANDA CARGA DE PRECIOS A BASCULA CORRECTAMENTE` (9 tickets, 6 escrituras). La raíz `CARGA DE` se apagó, probablemente por atrapar `DML SE BAJAN LPNS DE CARGA…`. |
-   | `ALTA SAP TIENDA/OAT` | Nombra el trámite (alta de usuario en SAP) | Sale de un solo grupo: hay que ver el ticket (título, categoría) para saber si el alta se hizo. |
-   | `SE BRINDA CONTACTO …` | Canalización: se da a quién acudir, no se resuelve | Es lo que el catálogo llama `INDICACIONES / CANALIZACION` o `RESPUESTA SIN ACCION DOCUMENTADA`. La raíz `CONTACTO` está apagada, quizá porque `TIPO DE CONTACTO` aparece en textos copiados del formulario. |
-   | `NAVEGACION` | Nombra el tema (navegación web o permisos de internet) | Puede ser `SEGURIDAD / CONECTIVIDAD` o un rótulo sin acción; sin título y categoría no se sabe. |
-
-5. **Falta para decidir:** los ejemplos por ticket (título, categoría, solución
-   al usuario, mensaje de error) y las filas exactas de los dos catálogos.
-   Salen en las secciones 1a-1e del diag nuevo; hoy no hay ejemplos por ticket
-   de estas frases en disco.
+Patrón común: en las cinco familias la evidencia repite el texto de la
+descripción (`QARe_Evidencia` = descripción en casi todos los ejemplos de 1d; en
+la ventana completa, 4 753 de 7 625, H20).
 
 ### 13.4 Normalización y coincidencias
 
-Cómo compara la vista hoy (cuerpo real):
+**Intercalación real.** La base, la columna `QARe_DescripcionSolucion` y
+`PalabraClave` usan `SQL_Latin1_General_CP1_CI_AS`. `PalabraClave` es
+**`varchar`**: una frase del catálogo no puede tener caracteres fuera de cp1252
+(0a).
 
-| Paso | Inválida | `CALIDAD` | `PATRON_SOLUCION` |
-|---|---|---|---|
-| Mayúsculas | `UPPER` en los dos lados (además la colación es CI) | igual | igual |
-| Espacios al borde | `LTRIM(RTRIM())` en los dos lados | igual | No se recortan; da igual con `%…%`, salvo que la frase del catálogo tenga espacios al borde (H15, 2f) |
-| Igualdad o contención | Igualdad | Igualdad | `LIKE '%frase%'` |
-| Acentos | Los distingue (`CI_AS`) | igual | igual |
-| Espacios repetidos, tab, CR/LF, NBSP | No se tocan (`LTRIM`/`RTRIM` solo quitan espacios) | igual | Cuentan como caracteres |
-| Ancho cero | No se quita | igual | igual |
-| "Solo signos" | Quita `. , * - _ / \ ; :`, tabulador y espacio; no quita NBSP, CR/LF ni `? # ( ) ' "` | — | — |
+| Prueba (contra `SIN RESPUESTA`, con la expresión de la vista) | ¿Igual en QA? (0b) |
+|---|---|
+| U+200C o U+200B delante | No |
+| U+FEFF (BOM) delante | **Sí** (la intercalación lo ignora) |
+| NBSP en medio o al final, tabulador o CR/LF al final | No |
+| Doble espacio interno | No |
+| Espacios al final | Sí |
+| Minúsculas | Sí |
+| Punto final | No |
+| `NAVEGACIÓN` = `NAVEGACION` (y con `LIKE`) | No (0c) |
+| `ALTAXSAP LIKE '%ALTA_SAP%'` | **Sí**: `_` es comodín (0c) |
 
-**La intercalación cambia el resultado** (LocalDB, sin datos de QA):
+**Impacto medido por nivel** (2b; los niveles se acumulan, y el catálogo se
+normaliza igual que el texto en cada uno):
 
-| Caso | `Latin1_General_CI_AS` | `SQL_Latin1_General_CP1_CI_AS` | `Latin1_General_100_CI_AS` |
-|---|---|---|---|
-| U+200C delante = texto limpio | No | No | **Sí** (lo ignora) |
-| U+200B delante = texto limpio | No | No | No |
-| U+FEFF (BOM) delante = texto limpio | **Sí** | (no probado) | (no probado) |
-| `LIKE '%[U+200B U+200C]%'` lo encuentra | Sí | Sí | **No** |
-| NBSP, tab o CR/LF = espacio | No | No | No |
-| Espacios finales en `=` | Se ignoran | Se ignoran | Se ignoran |
-| Espacio final en un patrón `LIKE` | Cuenta | Cuenta | Cuenta |
+| Nivel | Cambio | No evaluable | `CALIDAD` | Patrón | Sin patrón |
+|---|---|---|---|---|---|
+| 1 | La vista | 2 945 | 494 | 2 316 | 1 959 |
+| 2 | Sin invisibles; NBSP, tab y CR/LF a espacio; recorte | 2 947 | 494 | 2 317 | 1 956 |
+| 3 | + espacios colapsados | 2 947 | 494 | 2 319 | 1 954 |
+| 4 | + sin acentos | 2 947 | 494 | 2 323 | 1 950 |
+| 5 | + sin signos finales | 2 054 + 893 vacíos | 495 | 2 323 | 1 949 |
+| 9 | Nivel 1 con todas las reglas activas | 2 945 | 494 | 2 696 | 1 579 |
 
-Consecuencias:
+Qué cambia en cada paso (2c, 2d):
 
-- La afirmación de 12.4.2 de que la igualdad no quita los invisibles vale para
-  `CI_AS` con U+200B/U+200C, pero **no** para el BOM. Los 82 de 12.4.2 se
-  contaron con `LIKE` en la intercalación de la columna: si la columna fuera
-  `_100_`, ese conteo no habría visto los U+200C. La sección 0 del diag nuevo
-  mide la intercalación real y repite la prueba en QA.
-- Mayúsculas y espacios al borde **ya están resueltos**. Los pendientes son el
-  ancho cero, el NBSP, el tabulador, CR/LF, los espacios internos repetidos, los
-  acentos y los signos finales.
+- **1->2 (5 tickets).** `--` con un invisible y `SIN RESPUESTA` con ancho cero
+  pasan a inválida, como debe ser. Los otros 3 son la **trampa (H22)**: la regla
+  Id 9 es `' SQL'`, con un espacio inicial que hace de límite de palabra. Al
+  recortarla, `SE VALIDA FOLIO EN MYSQL` pasa a `BASE DE DATOS / DML`. Puede que
+  esté bien (MySQL es una base de datos), pero el cambio no viene de limpiar el
+  texto: viene de ampliar una regla. **El catálogo no se debe recortar al
+  normalizar**, o la Id 9 se reescribe antes.
+- **2->3 (2) y 3->4 (4).** Ganan patrón `SE ANEXA  MANUAL…`, `SE ENTREGO UNIDAD
+  DE IMAGEN`, `SE ACTIVA PARÁMETRO`, `SE REALIZA CALIBRACIÓN DE BASCULA`,
+  `SE REALIZA ENVIÓ DE BATERÍA…`: todos correctos.
+- **4->5.** 893 textos de solo signos pasan de *no evaluable* a *vacío*: el
+  mismo grupo con otro nombre. Solo `REPORTE MAL LEVANTADO.` cambia de verdad y
+  pasa a `CALIDAD`.
 
-**Qué es técnico y qué cambia el significado.** Técnico (no cambia el
-significado): ancho cero y BOM, NBSP/tabulador/CR/LF tomados como espacio,
-espacios repetidos, mayúsculas. Casi siempre técnico: los acentos (`NAVEGACIÓN`
-y `NAVEGACION` son lo mismo), salvo pares que hay que revisar uno por uno, como
-`SI`/`SÍ`: `SI` es inválida y con `CI_AS` la forma `SÍ` hoy no coincide. Puede
-cambiar el significado: quitar signos finales y, sobre todo, cualquier cambio
-en la regla de contención (raíces cortas, límite de palabra).
+**Catálogo (2f).** Hay 52 claves con dos o más filas que coinciden al quitar los
+acentos. Casi siempre son la misma frase con y sin acento; unas pocas son filas
+repetidas tal cual, como `POLITICAS DE WINDOWS`, que tiene cuatro. Con una
+intercalación `AS` las dos escrituras hacen falta, y por eso no son un error.
+Si se normalizan los acentos, sobra una de cada grupo. Seis pares además difieren
+en `Patron`, `Orden` o tipo, con una sola fila activa. Por ejemplo, `ERROR DE
+AUTENTICACION` es `CALIDAD` activa (Id 130) y `PATRON` inactiva (Id 137); `FALLA
+DE RED` es `CALIDAD` activa (Id 132) y `PATRON` inactiva (Id 139). Solo dos
+frases tienen bordes raros: la Id 9 `' SQL'` (espacio inicial) y la Id 182 (doble
+espacio, a propósito). Ninguna tiene `_`, `%` ni `[`.
 
-**Prueba de impacto antes de proponer el nivel.** La sección 2 del diag nuevo
-reclasifica cada texto con la lógica de la vista en cinco niveles acumulativos:
-1 = la vista; 2 = sin invisibles y con blancos a espacio; 3 = espacios
-colapsados; 4 = sin acentos; 5 = sin signos finales. Además corre el nivel 1 con
-todas las reglas reactivadas (nivel 9). Por paso lista cuántos tickets cambian,
-hacia dónde y los 40 textos más frecuentes que cambian (2c, 2d), para leerlos
-antes de aprobar el nivel. El nivel 1 tiene que dar 0 diferencias contra la
-vista (2a); si no, el simulador no vale.
-
-En los datos sintéticos de LocalDB (solo validan el mecanismo, no anticipan
-cifras de QA) se vieron los movimientos esperados: un texto con ancho cero
-delante de `SIN RESPUESTA` pasa de *sin patrón* a *inválida* en el paso 1->2;
-`NO SALE ERROR` con un espacio pasa a `PROBLEMA / NO SOLUCION` en el 2->3, y
-`SIN RESPUESTA DEL USUARIO.` pasa a `CALIDAD` en el 4->5.
-
-**Recomendación técnica (pendiente de medir):** aplicar los niveles 2 y 3 sin más
-trámite si 2d no muestra cambios de significado. El 4 (acentos) solo después
-de leer su lista en 2d. El 5 no, mientras no se revise texto por texto. Si se
-normaliza, el catálogo y el texto deben normalizarse con **la misma** función:
-hoy el catálogo tiene filas con y sin acento que, normalizadas, quedarían
-repetidas (2f lista las que además difieren en `Patron`, `Orden` o `Activo`).
+**Recomendación técnica.** Normalizar el texto en los niveles 2 a 4 es seguro.
+Sin recortar el catálogo mueve 8 tickets: 6 ganan patrón y 2 pasan a inválida. Hacerlo **sin recortar el catálogo** (H22). El nivel 5 no
+aporta nada. Escapar los comodines es preventivo: hoy no cambia nada. Como el
+efecto es chico, esto va después de las correcciones de filtro y de unión
+(13.7).
 
 ### 13.5 Reglas de clasificación existentes
 
 #### 13.5.1 `NO SALE ERROR`
 
-- **Regla actual:** fila `CALIDAD` `NO  SALE ERROR` (dos espacios) ->
-  `PROBLEMA / NO SOLUCION`, por igualdad exacta (12.7).
-- **Resultado:** 218 tickets en `CALIDAD` (12.7). Con la clave normalizada, la
-  familia suma 217 en el diag de calidad (I3). Que la cifra cuadre sugiere que
-  casi todos tienen los dos espacios, pero falta contarlo (3a).
-- **Concentración:** la lista I3, de 316 tickets con `NO SALE ERROR` y otras
-  frases de formulario, sale en un 96 % de 3 firmas (12.5). Las cinco muestras
-  por ticket de esa lista son de un mismo grupo de proveedor de aplicativos
-  (p. ej. INC 2026-442979, INC 2026-441939, `diag_qare_evidencia` 6). La muestra
-  no dice cuáles de ellas son `NO SALE ERROR`; 3a2 y 3a3 lo separan.
-- **Lectura:** el texto contesta a otra pregunta, la del mensaje de error, y no
-  describe la solución. El doble espacio fijo apunta a una plantilla o a un
-  texto pegado. 3a2 cruza con `QA_MensajeError` del mismo ticket para comprobarlo.
-- **Riesgo de cambiarla:** pasarla a inválida mueve 218 tickets de `CALIDAD` a
-  *no evaluable*: inválidas sobre evaluados pasan de 38.1 % a 40.9 %
-  (3 132 / 7 650), y `CALIDAD` baja de 492 a 274. Si los técnicos la usan para
-  decir "se revisó y no había error", sería una respuesta sin acción y no una
-  inválida.
-- **Daniela decide:** si es inválida, `PROBLEMA / NO SOLUCION` o
-  `RESPUESTA SIN ACCION DOCUMENTADA`. El arreglo del espacio (H3) es técnico y
-  no depende de esa decisión.
+- **Regla:** `CALIDAD` por igualdad exacta, Id 48 (`NO SALE ERROR`) e Id 182
+  (`NO  SALE ERROR`), ambas `PROBLEMA / NO SOLUCION` y activas (1e).
+- **Datos (3a, 3a2):** 218 tickets, todos con el texto exacto y doble espacio.
+  Vienen de 3 firmas y 217 de un mismo grupo de soporte de aplicativos. Las
+  categorías son de Caja General: diferencia de póliza (91), cierre de
+  conciliaciones (42), conciliación bancaria (28)… Causa: "necesidad del usuario"
+  (218). Tipo: "se dan indicaciones" (207). El `QA_MensajeError` del ticket dice
+  también "no sale" solo en 18.
+- **Lo que dicen los tickets (3a3):** la solución al usuario es "Se realizan los
+  ajustes necesarios para continuar (con su cierre)". O sea, hubo una acción.
+  `NO SALE ERROR` parece una respuesta fija al campo "mensaje de error" escrita
+  en el campo de la solución.
+- **Peso:** son 218 de los 494 tickets `CALIDAD` (44 %). En Técnicos, una sola
+  firma tiene 216 tickets `CALIDAD` de 217 con texto evaluable (4f). El KPI de
+  calidad depende casi por completo de esa plantilla.
+- **Daniela decide** si es inválida, `PROBLEMA / NO SOLUCION` (hoy) o
+  `RESPUESTA SIN ACCION DOCUMENTADA`. Pasarla a inválida deja la tasa de
+  inválidas en 41.0 % (13.9).
 
 #### 13.5.2 Texto igual al tipo de solución declarado
 
-- **Regla actual:** no hay una regla general. Depende de que el rótulo esté
-  cargado como frase: `SE DAN INDICACIONES, TÉCNICAMENTE NO SE HIZO NADA` (36) cae
-  en `INDICACIONES / CANALIZACION`; `NO FUE NECESARIO HACER NADA, YA ESTABA
-  SOLUCIONADO` (19), en `VALIDACION / SIN INTERVENCION` (12.7).
-- **Cantidad:** 66 tickets copian el tipo (Q1, `diag_qare_reglas_calidad`) y 67
-  en el conteo de `diag_qare_evidencia` 5a; salen de 4 firmas.
-- **Riesgo:** contar la copia como patrón infla el `PctConPatron` con tickets que
-  no describen nada nuevo. Mandarla a inválida castiga una respuesta que es
-  cierta (no se hizo nada).
-- **Daniela decide:** si copiar el tipo es patrón, respuesta sin acción
-  documentada o inválida. Técnicamente conviene una regla explícita (texto
-  normalizado = tipo normalizado) en lugar de cargar cada rótulo como frase. El
-  diag nuevo, en 3b, la cuenta por tipo.
+3b: 106 tickets copian el rótulo del tipo, y los 106 cuentan como patrón: 66
+iguales, 25 con el rótulo truncado y 15 que empiezan con el rótulo. El más común
+es `Se dan indicaciones, técnicamente no se hizo nada`, con 61 en total (36
+iguales, 22 truncados y 3 que empiezan con el rótulo); va a `INDICACIONES /
+CANALIZACION`. Le siguen `No fue necesario hacer nada…` (19, a `VALIDACION / SIN
+INTERVENCION`) y `Se otorgan permisos` (22, a `ROLES / PERMISOS`). Que funcione
+depende de que el rótulo esté cargado como frase; no hay una regla general.
+**Daniela decide** si copiar el tipo es patrón, respuesta sin acción
+documentada o inválida. Lo técnico es una regla explícita (texto normalizado =
+tipo normalizado), en vez de cargar cada rótulo como frase.
 
 #### 13.5.3 Exacto contra parcial
 
-- **Regla actual:** `CALIDAD` exige el texto completo; `PATRON_SOLUCION` acepta
-  que la frase aparezca en cualquier parte. Si un texto contiene una frase
-  `CALIDAD` y algo más, ya no es `CALIDAD` y queda en el patrón que encuentre el
-  `LIKE`, o sin patrón.
-- **Ejemplo:** `NUEVA CONTRASEÑA` sola es `RESPUESTA SIN ACCION DOCUMENTADA`;
-  `SE ANEXA NUEVA CONTRASEÑA` (18) es `CUENTAS / CREDENCIALES` por `CONTRASEÑA`
-  (12.4.11).
-- **Cantidad:** pendiente. 3c da, por regla `CALIDAD`, cuántos tickets atrapa
-  exacta y cuántos contienen la frase con más texto, y a dónde fueron.
-- **Riesgo:** pasar `CALIDAD` a contención marcaría como incompletas respuestas
-  buenas que incluyen la frase (`… NO SE ADJUNTO LO SOLICITADO, SE REENVIA Y SE
-  CORRIGE`). Dejarlo como está premia agregar palabras.
-- **Daniela decide:** si "incompleta" se define por todo el texto (hoy) o por la
-  ausencia de acción. Lo técnico es dar a cada regla un modo explícito (igual,
-  empieza con, contiene) en lugar de que el modo dependa del tipo.
+3c muestra, para cada regla `CALIDAD`, cuántos tickets coinciden de forma exacta
+y cuántos contienen la frase con más texto:
 
-#### 13.5.4 "Sin respuesta del usuario"
+- **Contención mal aplicada.** `FAVOR DE VALIDAR` tiene 0 exactos y 58 parciales.
+  Los parciales describen acciones reales (`SE CAMBIO LA VISIBILIDAD DE LA
+  CUENTA FAVOR DE VALIDAR`). `NUEVA CONTRASEÑA` tiene 0 exactos y 22 parciales,
+  todos ya en `CUENTAS / CREDENCIALES` (`SE ANEXA NUEVA CONTRASEÑA`, 18).
+  Marcarlos como incompletos sería un error.
+- **Contención bien aplicada.** `SE CIERRA (EL) REPORTE POR FALTA DE INFORMACIÓN`
+  (3), `EMBARQUE BLOQUEADO POR OTRO USUARIO` (9) y `APOYO … POR INTERMITENCIA EN
+  RED` (2) dicen lo mismo que la regla exacta.
+- **La igualdad exacta sí funciona** en `MATERIALES SIN PMV` (46), `SE ANEXA
+  EVIDENCIA` (33), `SIN TRANSITO` (7) y `FALLA DE RED` (6).
 
-Cuatro tratos para el mismo hecho (12.4.12): `SIN RESPUESTA` es inválida (121);
-`SIN RESPUESTA DEL USUARIO` exacta es `CALIDAD` (40); un texto que contenga `SIN
-RESPUESTA DE USUARIO` cae en `VALIDACION / SIN INTERVENCION`; `SIN RESPUESTA POR
-PARTE DE USUARIO` queda sin patrón (7). Además `SE CONTACTA SIN RESPUESTA` (4) y
-`SIN RESPUESTA POR PARTE` (variante de 8) quedan sin patrón (`diag_qare_patrones`
-2c, 4e). 3e lista todas las formas. Que el usuario no responda es un motivo de
-cierre, no una solución. **Daniela decide** un solo destino; lo técnico es que
-las cuatro formas lleguen a ese destino.
+Conclusión: mantener la igualdad exacta como regla general y dar un modo propio
+(contiene, empieza con) solo a las reglas en que Daniela lo apruebe. **Daniela
+decide** si "incompleta" se define por todo el texto o por la ausencia de
+acción.
+
+#### 13.5.4 "Sin respuesta"
+
+3e: `SIN RESPUESTA` es inválida (123). `SIN RESPUESTA DEL USUARIO` es `CALIDAD`
+`RESPUESTA SIN ACCION DOCUMENTADA` (40). `SIN RESPUESTA POR PARTE DE USUARIO` (7)
+y `SE CONTACTA SIN RESPUESTA` (4) quedan sin patrón. Son tres destinos para el
+mismo hecho, con 174 tickets. **Daniela decide** un solo destino. Lo técnico es
+que todas las formas lleguen a él.
 
 #### 13.5.5 Reglas desactivadas
 
-`CARGA DE`, `ALTA SAP`, `NAVEGACION`, `CONTACTO` y la inválida `error` están
-inactivas (13.3). El catálogo no guarda por qué se apagó cada una. Para cada
-regla inactiva, 3d cuenta cuántos tickets atraparía hoy, separados por su
-resultado actual: muchos en *patrón* indican que coincidía de más o era
-redundante; muchos en *sin patrón*, que deja un hueco. 3d2 muestra los textos
-del hueco. **Recomendación:** no reactivar raíces cortas. Proponer frases
-completas (`CARGA DE PRECIOS`, `ALTA SAP TIENDA`, `SE BRINDA CONTACTO`) cuando
-Daniela haya decidido a qué patrón va cada una.
+Para cada regla inactiva, 3d cuenta cuántos tickets atraparía hoy, separados por
+su resultado actual. 3d2 muestra los huecos y 2d (paso 1->9) el destino.
+
+| Regla inactiva | Sin patrón que atraparía | Lectura |
+|---|---|---|
+| `CONTACTO` (Id 30) | 85 | Atrapa de más (`CONFIRMA CONTACTO DE TIENDA`); usar frases completas |
+| `CARGA DE` (Id 35) | 96 | Atrapa de más (`CARGA DE PAGINA`, `CARGA DE IMAGEN`); usar `CARGA DE PRECIO` |
+| `ALTA SAP` (Id 84) | 57 | Coincide justo con la familia; el destino depende de 13.3 |
+| `NAVEGACION` (Id 46) | 31 | Destino dudoso (13.3) |
+| `VALIDACION`/`VALIDACIÓN` (Id 223, 222) | 23 + 16 | Raíz muy general |
+| `POLITICAS DE WINDOWS` (Id 134, 141; duplicadas) | 15 | Las dos filas son iguales; el destino es claro |
+| `SCRIPT` (Id 147) | 9 | Raíz corta, pero los textos sí son scripts |
+| `REPAR` (Id 22) | 10 | Raíz corta; incluye `EL CONTRATO NO CUBRE LA REPARACION`, que no es una reparación |
+
+Las inválidas inactivas `.`, `-`, `,`, `-----------` y `v` no importan: esos
+textos ya son no evaluables por la regla de solo signos (3d3). La única inactiva
+que cambia algo es `error` (74, H8).
+
+**Recomendación:** no reactivar raíces cortas. Proponer frases completas cuando
+Daniela decida a qué patrón va cada familia.
 
 ### 13.6 Consistencia entre procedimientos
 
+Los cuatro cuerpos son de 4a. KPIs y Técnicos se modificaron por última vez el
+2026-11-25, Patrones también, y el Detalle el 2026-11-26 (4a2).
+
 | Aspecto | KPIs | Técnicos | Patrones | Detalle | Lectura |
 |---|---|---|---|---|---|
-| Fuente | vista | vista | vista (`#Base`, solo texto evaluable) | vista | Igual: nadie reclasifica |
-| Conteo | `COUNT(DISTINCT)` | `COUNT(DISTINCT)` | `COUNT(DISTINCT)` | filas | El Detalle es el único que ve duplicados (H2) |
-| Fechas NULL | Todo el historial | igual | igual | igual | Intencional en el prototipo; no sigue los 15 días de los SP QARE (9.11) |
-| Fin de rango | Inclusivo (12.3b) | Inclusivo | Inclusivo | `< FechaFin + 1` (verificado) | `FechaFirmaSolucion` es `datetime2`: un `<= @FechaFin` perdería el último día; 4d/4e lo comprueban en los tres sin cuerpo en disco |
+| Fuente | vista | vista | vista → `#Base` (texto evaluable con clasificación) | vista | Nadie reclasifica |
+| Conteo | `COUNT(DISTINCT)` | `COUNT(DISTINCT)` | `COUNT(DISTINCT)` | filas | Cuadran en la ventana (4e, 4g) |
+| Fin de rango | `< @FechaFin + 1` | igual | igual | igual | Correcto: `<= @FechaFin` perdería 34 tickets del último día (4d) |
 | Inicio > fin | No valida | `THROW 50001` | `THROW 50001` | `THROW 50001` | H16 |
-| Firma NULL | Cuenta | Excluye | Sin verificar (4a) | Cuenta | H17; 0 en la ventana; todo el historial: 4c |
-| Sin información QARE | En el total | Columna propia | Fuera (solo texto evaluable) | Filas con etiqueta | Intencional: % sobre evaluados o sobre texto evaluable (8.1) |
-| Cuentas no persona | No excluye | No excluye (salen como filas) | No excluye | No excluye | H19, decisión 9.2 |
+| Firma NULL | Cuenta | Excluye | Cuenta | Cuenta | H17; 0 en todo el historial (4c) |
+| Fechas NULL | Todo el historial | igual | igual | igual | 383 214 tickets desde 2025-01-01 (4c) |
+| Denominadores | % sobre evaluados | Inválidas y texto evaluable sobre evaluados; patrón, calidad y sin patrón sobre texto evaluable | % sobre texto evaluable | — | Coherente entre los tres |
+| `@Top` | — | — | `NULL` por defecto = todos | — | El Pareto se calcula sobre todos los patrones |
 | Filtros | — | Grupo | Grupo, Técnico | Grupo, Técnico, Categoría, Estado, Clasificación | H18 |
-| Tipo de parámetro | — | `VARCHAR` | `VARCHAR` | `VARCHAR` | Las columnas son `NVARCHAR`: un nombre fuera de cp1252 no coincidiría. En QA no hay U+FFFD ni NBSP en firmas (12.5); 4h lo mide en grupo y categoría |
-| Etiquetas de estado | — | — | — | Salida visual, filtro interno | H1 |
-| Pareto | — | — | % sobre todos los tickets con patrón, no sobre el `@Top` | — | Intencional; documentarlo en la pantalla |
+| Parámetros | `date` | `varchar(250)` | `varchar(250)` | `varchar` | Ningún grupo, firma ni categoría de la ventana cambia al pasar por `VARCHAR` (4h, 0 filas); el riesgo es teórico |
+| Etiquetas de estado | — | — | — | La salida usa la etiqueta y el filtro el valor interno | H1 |
+| Cuentas no persona | No excluye | Salen como filas | No excluye | No excluye | H19 |
 
-**Cuadre.** En la ventana medida, el total por técnico cuadra con el global
-(9 341 = 1 715 + 3 309 + 4 317 con la regla de 11.4, 12.5), y la vista cuadra
-con sus partes (1 724 + 2 914 + 4 736 = 9 374; 492 + 2 302 + 1 942 = 4 736;
-12.7). Un ticket ya no aparece dos veces (sql/45). Falta cuadrar las salidas
-reales de los cuatro SP para la misma ventana: el diag nuevo, en 4e, compara
-KPIs con Detalle campo por campo, y 4f/4g muestran Técnicos y Patrones, con y
-sin grupo, frente a lo que se espera de la vista.
+**Técnicos (4f).** Las filas incluyen cuentas de automatización y de proveedor.
+Por ejemplo, una cuenta de *setup* tiene 651 tickets, 592 de ellos sin
+información QARE. Las inválidas se concentran: 12 firmas con 50 o más evaluados
+y 90 % o más de no evaluables suman 1 537 de las 2 945 inválidas (H21). Para la
+pantalla, eso dice más que el total.
 
-**Intencional contra inconsistente.** Intencional, o al menos coherente:
-fechas NULL = todo el historial, % sobre evaluados, Pareto sobre el total, un
-ticket por fila. Inconsistente: H1 (etiqueta y filtro), H16 (validación), H17
-(firma NULL) y H18 (filtros). H18 cambia lo que ve el usuario (las tarjetas no
-se mueven con Categoría ni Técnico) y por eso se lista como decisión.
+**Tiempos observados** (una corrida, con caché, en lotes con `INSERT EXEC`): KPIs
+unos 3 s, cada Detalle unos 5 s, Técnicos 11 s, Patrones 8 s, y 20 s para leer
+el historial completo de la vista. No sustituyen la medición de 12.4.7.
 
 ### 13.7 Correcciones técnicas recomendadas
 
@@ -1340,65 +1356,71 @@ Son cambios a objetos de Daniela. Cada uno lleva su script con rollback, se
 prueba antes en LocalDB y se aplica en QA solo con aprobación explícita y con su
 acuerdo.
 
-| Orden | Corrección | Hallazgo | Objeto | Impacto esperado |
+| Orden | Corrección | Hallazgo | Objeto | Impacto medido |
 |---|---|---|---|---|
-| 1 | Unir inválidas con `EXISTS` o `OUTER APPLY TOP (1)` en vez de `LEFT JOIN`, o poner un índice único filtrado sobre `(Campo, UPPER(Valor))` activo | H2 | vista o catálogo | Ninguno hoy; evita que vuelva a pasar lo de `v`/`V` |
-| 2 | Que el Detalle acepte el valor interno **y** la etiqueta, o que devuelva los dos | H1 | `usp_QARE_DetalleEvidencia` | El filtro por estado deja de dar 0 filas |
-| 3 | Una sola función de normalización (niveles 2 y 3) para texto y catálogo | H3, H4, H6 | vista | Cambian ≤ 82 tickets por ancho cero más los de 2->3; el `NO SALE ERROR` de un espacio deja de escaparse. Cifras: 2c |
-| 4 | Validar inicio > fin en KPIs; mismo trato de firma NULL en todos | H16, H17 | KPIs, Técnicos | Ninguno hoy en la ventana |
-| 5 | Escapar `_ % [` al usar `PalabraClave` en `LIKE`, o pasar a `CHARINDEX` | H15 | vista | Según 2f |
-| 6 | Acentos (nivel 4), revisando antes la lista 2d | H5 | vista y catálogo | Según 2c (3->4); permite borrar las filas duplicadas por acento |
-| 7 | Modo de comparación explícito por regla (igual, empieza con, contiene) | H11, H14 | catálogo y vista | Depende de las decisiones de 13.8 |
+| 1 | Que el Detalle acepte el valor interno **y** la etiqueta en `@EstadoDescripcion` | H1 | `usp_QARE_DetalleEvidencia` | El filtro por la etiqueta pasa de 0 filas a 2 945 |
+| 2 | Unir las inválidas con `EXISTS` u `OUTER APPLY TOP (1)` en vez de `LEFT JOIN` | H2 | vista | 0 tickets hoy; evita duplicados futuros |
+| 3 | Validar inicio > fin en KPIs, como los otros tres | H16 | KPIs | 0 tickets |
+| 4 | Normalizar el texto en los niveles 2-4 **sin recortar el catálogo** | H4-H6, H22 | vista | 6 tickets ganan patrón y 2 pasan a inválida |
+| 5 | Escapar `_ % [` de `PalabraClave` o usar `CHARINDEX` | H15 | vista | 0 hoy; preventivo |
+| 6 | Modo de comparación explícito por regla | H11, H14 | catálogo y vista | Depende de 13.8 |
+
+La normalización de acentos (antes la 6) entra en la 4, porque 3->4 solo dio
+cambios correctos. La que unificaba la firma NULL se quita: no tiene efecto.
 
 ### 13.8 Decisiones funcionales pendientes (Daniela)
 
-No se le preguntan todavía: primero se corre el diag nuevo para llevarlas con
-ejemplos por ticket.
+No se le preguntan todavía. Cada una va con sus ejemplos por ticket.
 
-1. `ERROR` solo: ¿inválida? ¿Y `ERROR TIENDA`, `ERROR OPERATIVO`? (H8)
-2. `CARGA DE PRECIOS`, `ALTA SAP TIENDA/OAT`, `NAVEGACION`: ¿patrón, respuesta
-   sin acción documentada o rótulo inválido? ¿Por qué se apagaron sus reglas? (H9)
-3. `SE BRINDA CONTACTO …`: ¿`INDICACIONES / CANALIZACION` o sin acción? (H9)
-4. `NO SALE ERROR`: ¿inválida, problema o sin acción? (H10)
-5. Copiar el tipo de solución: ¿patrón, sin acción o inválida? (H13)
-6. "Sin respuesta del usuario": ¿un solo destino? ¿Cuál? (H12)
-7. ¿"Incompleta" se define por todo el texto o por la ausencia de acción? (H11)
-8. Filtros que respeta cada bloque de la pantalla (H18) y trato de cuentas no
-   persona y proveedores (H19, 9.2).
-9. Si una evidencia que repite la descripción cuenta como evidencia (H20).
-10. Si los catálogos actuales son la versión aprobada y quién los mantiene (12.6).
+1. `ERROR` solo: ¿inválida, o `PROBLEMA / NO SOLUCION` como `ERROR DE USUARIO`?
+   (H8; 1d)
+2. `CARGA DE PRECIOS`: ¿`CARGA / SINCRONIZACION` con la frase `CARGA DE PRECIO`?
+   (13.3)
+3. `ALTA SAP TIENDA/OAT`: ¿`CUENTAS / CREDENCIALES`, aunque 7 de 57 sean "se
+   hace por SorIA"? (13.3)
+4. `SE BRINDA CONTACTO …` y vecinas: ¿`INDICACIONES / CANALIZACION`? (13.3)
+5. `NAVEGACION` en Seguridad Informática: ¿`ROLES / PERMISOS`? (13.3)
+6. `NO SALE ERROR`: ¿inválida, problema o sin acción, si la solución dice que se
+   hicieron ajustes? (H10; 3a3)
+7. Copiar el tipo de solución (106): ¿patrón, sin acción o inválida? (H13)
+8. "Sin respuesta" (174): ¿un solo destino? (H12)
+9. ¿"Incompleta" se define por todo el texto o por la ausencia de acción? ¿Qué
+   reglas `CALIDAD` pasan a contención? (H11)
+10. Filtros de cada bloque de la pantalla (H18); cuentas no persona y
+    proveedores (H19); si Técnicos se ordena o se marca por concentración de
+    inválidas (H21).
+11. Si la evidencia que repite la descripción cuenta como evidencia (H20).
+12. Si los catálogos actuales son la versión aprobada y quién los mantiene
+    (12.6).
 
-### 13.9 Impacto en los cuatro SP y en los KPIs
+### 13.9 Impacto en los KPIs
 
-Base: vista en la ventana después de `sql/45` (12.7): evaluados 7 650, no
-evaluables 2 914 (38.1 %), texto evaluable 4 736 (`CALIDAD` 492, patrón 2 302,
-sin patrón 1 942). Son estimaciones de **cada cambio aplicado solo**, con los
-conteos ya medidos. Los cambios no se suman: un mismo ticket puede estar en
-dos.
+Base (4d2, 4e): evaluados 7 714; no evaluables 2 945 (38.2 %); texto evaluable
+4 769, que se reparte en patrón 2 316 (48.6 %), `CALIDAD` 494 (10.4 %) y sin
+patrón 1 959 (41.1 %). Cada fila estima **un cambio aplicado solo**. Los cambios
+no se suman: un ticket puede estar en dos.
 
-| Cambio | No evaluables | % inválidas | Texto evaluable | Barra (patrón / calidad / sin patrón) |
-|---|---|---|---|---|
-| `ERROR` inválida (74) | 2 988 | 39.1 % | 4 662 | sin patrón −74 |
-| `NO SALE ERROR` inválida (218) | 3 132 | 40.9 % | 4 518 | calidad −218 |
-| Frases completas para las 4 familias de 13.3 (≈ 193) | = | = | = | patrón +193, sin patrón −193 (de 41.0 % a ≈ 36.9 % sin patrón) |
-| Normalización niveles 2-3 | sube (ancho cero + `SIN RESPUESTA`) | sube | baja | por medir (2b) |
+| Cambio | No evaluables (% de evaluados) | Texto evaluable | Barra (patrón / calidad / sin patrón) |
+|---|---|---|---|
+| `ERROR` inválida (74) | 3 019 (39.1 %) | 4 695 | sin patrón 1 885 (40.1 %) |
+| `NO SALE ERROR` inválida (218) | 3 163 (41.0 %) | 4 551 | calidad 276 (6.1 %) |
+| Frases completas para las 4 familias de 13.3 (231, 1b) | = | = | patrón 2 547; sin patrón 1 728 (36.2 %) |
+| Normalización niveles 2-4 (2b; incluye los 3 de H22) | 2 947 | 4 767 | patrón 2 323; sin patrón 1 950 (40.9 %) |
+| Todas las reglas reactivadas (2b, nivel 9; **no se recomienda**) | = | = | patrón 2 696; sin patrón 1 579 (33.1 %) |
 
-Efecto por SP: **KPIs** cambia por inválidas y normalización. **Técnicos** reparte
-los mismos cambios por firma; como cada familia sale de 2 a 5 firmas, el efecto
-se concentra en pocas filas. **Patrones** mueve la barra y el Pareto: patrones
-nuevos o más grandes en `CARGA / SINCRONIZACION`, `DATOS MAESTROS / CATALOGOS` e
-`INDICACIONES / CANALIZACION`, si ahí van. **Detalle** no cambia de forma, solo
-de etiquetas, y H1 arregla su filtro.
+Efecto por SP: **KPIs** cambia solo con las inválidas. **Técnicos** concentra
+los cambios en pocas filas: `NO SALE ERROR` está en 3 firmas y `ALTA SAP` en 2.
+**Patrones** mueve la barra y el Pareto: `CARGA / SINCRONIZACION` pasaría de 14
+a unos 104 tickets. **Detalle** solo cambia de etiquetas; la corrección 1
+arregla su filtro.
 
 ### 13.10 Orden recomendado
 
-1. Correr `sql/diag/diag_qare_correcciones.sql` en QA y guardar la salida en
-   `.rpt`. Revisar primero 0a/0b (intercalación) y 2a (= 0 diferencias).
-2. Correcciones sin decisión de negocio: 1 y 2 de 13.7, y luego la 4.
-3. Normalización (13.7.3) con las cifras de 2c/2d; acentos (13.7.6) después de
-   leer su lista.
-4. Llevar a Daniela 13.8 con los ejemplos de 1d, 3a3, 3c2 y 3d2.
-5. Con sus respuestas, ajustar el catálogo con frases completas (13.5.5) y el
-   modo de comparación (13.7.7).
-6. Medir el rendimiento de los cuatro SP con 15 y 90 días (12.4.7) antes de
+1. Correcciones 1-3 de 13.7: confirmadas y sin decisión de negocio. Script con
+   rollback, prueba en LocalDB y aprobación antes de QA.
+2. Llevar a Daniela 13.8 con los ejemplos de 1d, 3a3, 3b, 3c2 y 3d2.
+3. Con sus respuestas, frases completas en el catálogo (13.5.5) y modo por regla
+   (13.7.6).
+4. Normalización (13.7.4), sin recortar el catálogo.
+5. Medir el rendimiento de los cuatro SP con 15 y 90 días (12.4.7) antes de
    exponerlos.
