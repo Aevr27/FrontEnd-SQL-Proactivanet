@@ -1527,3 +1527,123 @@ se borró. A = cuerpos originales, B = con `sql/46`, C = después del rollback.
 - En una base sin los objetos de QA, `SET NOEXEC ON` no ejecuta nada, pero
   SQL Server igual compila el `ALTER VIEW` y muestra un error 208. En QA no pasa.
 - Los SP que leen la vista se recompilan en su siguiente ejecución.
+
+## 14. Contrato SQL real del tablero contra las capturas de Daniela (2026-11-27, solo lectura)
+
+**Fuentes.**
+- Seis capturas de Daniela (`QARE_Daniela_Screenshots.zip`), tomadas en una
+  ejecución con fecha y rango que no conocemos.
+- Los cuerpos reales de los cuatro SP (diag 4a) y de la vista (diag de objetos,
+  sección 4), con `sql/46` ya aplicado.
+
+Los números de las capturas **no son valores actuales**: se usan para comprobar
+la aritmética, no como resultado esperado. No se ejecutó nada en QA.
+
+**Marcas:** **C** = confirmado en el código o en la aritmética de las capturas ·
+**D** = diferencia · **H** = hipótesis.
+
+### 14.1 Captura → objeto
+
+| Captura | Objeto y result set | Estado |
+|---|---|---|
+| 01 Detalle de tickets | `usp_QARE_DetalleEvidencia`, único result set | **C**: las 14 columnas, en el mismo orden y con los mismos nombres |
+| 02 Resumen por técnico | `usp_QARE_CalidadCaptura_Tecnicos` | **C**: las 14 columnas, en el mismo orden; filas en orden `TicketsEvaluados DESC` |
+| 03 Pareto | `usp_QARE_PatronesSolucion`, result set 2 | **C**: `Posicion, PatronSolucion, Tickets, Porcentaje, TicketsAcumulados, PctAcumulado` |
+| 04 Distribución 52 / 8 / 40 % | **Ningún objeto SQL** | **D** (14.4) |
+| 05 Resumen de texto evaluable | `usp_QARE_PatronesSolucion`, result set 3 | **C**: las 7 columnas |
+| 06 KPIs globales | `usp_QARE_CalidadCaptura_KPIs` | **C**: las 7 columnas. Resuelve "sin nombre en las capturas" (9.10) |
+
+`usp_QARE_PatronesSolucion` devuelve **tres** result sets. El 1 es la
+distribución completa por `ClasificacionRespuesta` (patrones, las dos
+clasificaciones de calidad y `SIN PATRON IDENTIFICADO`) y no aparece en ninguna
+captura.
+
+### 14.2 Dependencias y lógica compartida
+
+`CatQARE_RespuestaInvalida` + `CatQARE_PatronSolucion` → `vw_QARE_CalidadCaptura`
+(lee `vw_CorreoQARECierre_Base`) → los cuatro SP. **Nadie reclasifica:** los
+estados y las clasificaciones salen solo de la vista (**C**).
+
+| Concepto | Dónde se decide | Regla (cuerpo real) |
+|---|---|---|
+| `EstadoDescripcion` | vista | Texto NULL o vacío → `SIN INFORMACION QARE`. Si no, inválida del catálogo o solo signos → `NO EVALUABLE`. Si no, `TEXTO EVALUABLE`. El orden hace que *sin información* **nunca** cuente como no evaluable (**C**; confirma 8.1) |
+| `ClasificacionRespuesta` / `TipoClasificacionRespuesta` | vista | Solo con texto evaluable: `CALIDAD` (igualdad exacta) antes que `PATRON_SOLUCION` (`LIKE`); si no, `SIN PATRON IDENTIFICADO`. En los otros estados es NULL (**C**; captura 01: NULL en inválida y en sin información) |
+| Etiqueta visual del estado | Detalle | `NO EVALUABLE` → `RESPUESTA INVALIDA`, `TEXTO EVALUABLE` → `RESPUESTA ANALIZABLE`. El filtro acepta las dos formas desde `sql/46` |
+| Fecha | los 4 SP | `FechaFirmaSolucion >= @FechaInicio AND < @FechaFin + 1 día`; NULL = sin límite por ese lado (**C**) |
+| Inicio > fin | los 4 SP | `THROW 50001` (KPIs desde `sql/46`) (**C**) |
+| Conteo | KPIs, Técnicos, Patrones | `COUNT(DISTINCT CodigoTicket)`. El Detalle devuelve una fila por ticket |
+| Porcentajes | dentro de cada SP | `CAST(100.0 * x / NULLIF(den, 0) AS DECIMAL(10,2))`, escala 0-100, con NULL si el denominador es 0 (**C**; captura 02: fila con 0 de texto evaluable → `NULL`) |
+
+**Dónde se calcula cada porcentaje** (todos en SQL):
+
+| Columna | SP | Denominador | Comprobación en las capturas |
+|---|---|---|---|
+| `PctNoEvaluable`, `PctTextoEvaluable` | KPIs, Técnicos | evaluados (= total − sin información) | 06: 2 581/6 716 = 38.43; 4 135/6 716 = 61.57; 8 304 = 1 588 + 6 716 |
+| `PctConPatron`, `PctCalidad`, `PctSinPatron` | Técnicos, Patrones RS3 | texto evaluable | 05: 2 010/4 135 = 48.61; 435/4 135 = 10.52; 1 690/4 135 = 40.87; suman 4 135 |
+| `Porcentaje`, `PctAcumulado` (Pareto) | Patrones RS2 | todos los tickets con patrón (`SUM() OVER ()`), **no** solo las filas de `@Top` | 03: 278/2 010 = 13.83; 1 990/2 010 = 99.00 |
+| `Porcentaje` (distribución) | Patrones RS1 | texto evaluable | — |
+
+**Coherencia entre capturas (C).** 05 y 06 son de la misma ejecución: los dos
+tienen texto evaluable = 4 135. El total del Pareto (2 010) es igual a
+`TicketsConPatron` de 05. En 02, cada fila cumple total = sin información +
+evaluados, evaluados = no evaluables + texto evaluable, y texto evaluable =
+patrón + calidad + sin patrón.
+
+### 14.3 Población y filtros de cada SP
+
+| | KPIs | Técnicos | Patrones | Detalle |
+|---|---|---|---|---|
+| Sin información QARE | En el total y en su columna | En el total y en su columna | **Fuera** (solo texto evaluable) | Filas con su etiqueta |
+| Firma NULL | Cuenta | **Excluida** | Cuenta | Cuenta |
+| Cuentas no persona y proveedores | Incluidas | Incluidas, como filas | Incluidas | Incluidas |
+| Filtros | Solo fechas | Fechas, `@Grupo` | Fechas, `@Grupo`, `@FirmaSolucion`, `@Top` | Fechas, `@Grupo`, `@FirmaSolucion`, `@Categoria`, `@EstadoDescripcion`, `@ClasificacionRespuesta` |
+| Tipo de los filtros de texto | — | `VARCHAR(250)`, igualdad exacta y un solo valor | igual | igual (`@Categoria` 500) |
+
+La firma NULL hoy no pesa: hay 0 en 383 214 tickets (4c).
+
+### 14.4 Diferencias e inconsistencias
+
+| # | Diferencia | Marca | Efecto en el tablero |
+|---|---|---|---|
+| X1 | **Captura 04** ("Patrón reconocido 52 % · Observación de captura 8 % · Sin patrón 40 %"): no la produce ningún objeto, el rótulo "Observación de captura" no existe en SQL, y los números no son los de 05 (48.61 / 10.52 / 40.87 en la misma población). Redondear 48.61 no da 52. | **D** | La barra debe usar `PctConPatron / PctCalidad / PctSinPatron` de Patrones RS3. **H:** es el borrador ASCII que 3.2 ya había identificado, o una ejecución distinta. No se inventa una regla para cuadrarlo |
+| X2 | **El Pareto de 03 llega a 99.00 %** con 13 filas. El SP no excluye patrones y `@Top` vale NULL por defecto (todas las filas). Los 20 tickets que faltan están en las posiciones 14 en adelante. | **C** (código) / **H** (si la captura se recortó o se corrió con `@Top = 13`) | Con `@Top` se ven menos barras, pero los porcentajes siguen siendo sobre el total. En QA (15:23) había 17 patrones |
+| X3 | **Default de fechas:** con NULL/NULL, los cuatro SP leen **todo el historial** (383 214 tickets desde 2025-01-01). La convención QARE del tablero (2.2) es de 15 días. | **D** | El frontend siempre debe mandar las dos fechas, o se ajustan los SP (requiere decisión) |
+| X4 | **Filtros distintos por bloque:** KPIs no recibe grupo ni técnico; Técnicos no recibe técnico; Categoría solo mueve el Detalle. | **D** (H18) | Si la pantalla tiene un filtro de grupo, las tarjetas no lo respetan y la barra y el Pareto sí: los números no cuadran entre bloques |
+| X5 | **Convención de filtros:** un solo valor `VARCHAR` con igualdad, contra la convención QARE de lista por comas (`fn_CorreoBacklog_SplitList`, 2.2). | **D** | Para elegir varios grupos habría que hacer una llamada por grupo y sumar, cosa que **no** debe hacerse con `COUNT(DISTINCT)`. O hay que ajustar los SP |
+| X6 | **El Detalle no devuelve `TipoClasificacionRespuesta`** (está comentado en el cuerpo). Para pintar "respuesta incompleta" el frontend tendría que saber que `PROBLEMA / NO SOLUCION` y `RESPUESTA SIN ACCION DOCUMENTADA` son de tipo `CALIDAD`. | **D** | Lógica de clasificación duplicada en el cliente, que se rompe si cambia el catálogo. Mejor exponer la columna en SQL |
+| X7 | **El Detalle no devuelve `IdReglaClasificacion` ni `FraseClasificacion`** (comentados), así que la "Regla detectada" del mockup (3.5) no tiene fuente. | **D** | Exponerlas en SQL, o quitarlas del diseño |
+| X8 | **Orden de Técnicos:** solo `TicketsEvaluados DESC`, sin desempate. | **D** menor | Con empates el orden puede cambiar entre llamadas; el frontend no debe depender de él, o se agrega un desempate en SQL |
+| X9 | **`DECIMAL(10,2)`** en lugar del `DECIMAL(6,2)` de la convención QARE. | **D** menor | Ninguno: la escala sigue siendo 0-100 |
+| X10 | Cuentas no persona y proveedores dentro de Técnicos (H19) | **D** (decisión pendiente) | Filas que no son personas en la tabla de técnicos |
+
+Lo que **coincide sin diferencias**: nombres, orden y significado de las
+columnas de las capturas 01, 02, 03, 05 y 06; la regla de que *sin información*
+no cuenta como no evaluable; los denominadores; las relaciones total =
+sin información + inválidas + texto evaluable y texto evaluable = patrón +
+calidad + sin patrón; las etiquetas visuales del Detalle; y el rango de fechas
+inclusivo.
+
+### 14.5 Qué consume el frontend y qué calcula
+
+**Consumir tal cual de SQL** (sin recalcular):
+
+| Bloque | Fuente |
+|---|---|
+| Tarjetas | KPIs: los 7 campos |
+| Barra segmentada | Patrones RS3: `PctConPatron / PctCalidad / PctSinPatron` y sus conteos. **No** normalizar a 100: el redondeo puede dar 99.99 o 100.01 |
+| Pareto | Patrones RS2, en el orden de `Posicion`. Barras = `Tickets`; línea = `PctAcumulado` |
+| Tabla por técnico | Técnicos: todas las columnas, ordenadas como llegan |
+| Evidencia | Detalle: el estado visual y la clasificación como llegan; el filtro de estado con la etiqueta (`sql/46`) |
+
+**Lo único que hace el frontend:**
+- Leer los **tres** result sets de Patrones en orden (`NextResult`).
+- Mostrar NULL como "—" en los porcentajes.
+- Poner los rótulos de pantalla ("Respuestas inválidas" = `TicketsNoEvaluables`,
+  etc., 3.4).
+- Mandar **siempre** las dos fechas (X3).
+- Paginar y buscar dentro de la tabla de evidencia ya recibida.
+
+**Ningún indicador necesita cálculo en el cliente.** Lo que quedaría fuera de
+SQL si no se corrige: X6 (tipo de clasificación en el Detalle) y X4 / X5
+(filtros). Para esos casos, la recomendación es **ajustar SQL**, con la
+aprobación correspondiente, y **no** compensarlo en el frontend.
