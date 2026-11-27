@@ -1416,11 +1416,69 @@ arregla su filtro.
 
 ### 13.10 Orden recomendado
 
-1. Correcciones 1-3 de 13.7: confirmadas y sin decisión de negocio. Script con
-   rollback, prueba en LocalDB y aprobación antes de QA.
+1. Correcciones 1-3 de 13.7: confirmadas y sin decisión de negocio. Script y
+   rollback listos y probados en LocalDB (13.11); falta aprobación para QA.
 2. Llevar a Daniela 13.8 con los ejemplos de 1d, 3a3, 3b, 3c2 y 3d2.
 3. Con sus respuestas, frases completas en el catálogo (13.5.5) y modo por regla
    (13.7.6).
 4. Normalización (13.7.4), sin recortar el catálogo.
 5. Medir el rendimiento de los cuatro SP con 15 y 90 días (12.4.7) antes de
    exponerlos.
+
+### 13.11 `sql/46`: correcciones 1-3 (preparadas, NO aplicadas en QA)
+
+Archivos: `sql/46_qare_correcciones_detalle_vista_kpis.sql` y
+`sql/46_qare_correcciones_detalle_vista_kpis_rollback.sql`. Usan `ALTER`, así que
+conservan los permisos. No tocan tablas, datos ni catálogos.
+
+**Qué cambia en cada objeto.** Fuera de esto, los cuerpos son el texto de QA
+leído el 2026-11-27.
+
+| Objeto | Cambio | Lo que no cambia |
+|---|---|---|
+| `usp_QARE_DetalleEvidencia` | `@EstadoDescripcion` se traduce a `@EstadoInterno`: `RESPUESTA INVALIDA` → `NO EVALUABLE` y `RESPUESTA ANALIZABLE` → `TEXTO EVALUABLE`; cualquier otro valor pasa igual | Los parámetros, las columnas de salida, el orden y los demás filtros. Filtrar por el valor interno da lo mismo que antes |
+| `vw_QARE_CalidadCaptura` | El `LEFT JOIN` a `CatQARE_RespuestaInvalida` pasa a ser un `EXISTS` dentro de `flags`, con la **misma** condición (`Campo`, `Activo`, `UPPER(LTRIM(RTRIM()))` en los dos lados) | Las columnas, la regla de solo signos, `CALIDAD` antes que patrón y el orden de las reglas (`Orden`, largo, `IdRegla`). `s` no se usaba en ningún otro lugar de la vista |
+| `usp_QARE_CalidadCaptura_KPIs` | Bloque `THROW 50001, 'La FechaInicio no puede ser mayor que la FechaFin.', 1` copiado de los otros tres SP | El cálculo, los filtros y el rango inclusivo |
+
+**Salvaguardas** (el mismo patrón que `sql/84`):
+- Solo corre en `Tickets_Proactivanet` y con `aprobar_migracion = 46` (`46R`
+  para el rollback). También corre en una base de prueba `QarePrueba_*`.
+- **Precondición:** el SHA2-256 de cada `OBJECT_DEFINITION`, sin espacios,
+  tabuladores ni saltos de línea, tiene que coincidir con el del texto leído de
+  QA. Si Daniela cambió cualquiera de los tres objetos, el script no hace nada y
+  muestra los hashes que encontró.
+- Las tres modificaciones van en una sola transacción. La **postcondición**
+  compara los tres hashes finales; si alguno no coincide, se deshace todo.
+- El archivo es UTF-8 con BOM, porque los comentarios de los cuerpos tienen
+  acentos y entran en el hash.
+
+**Pruebas en LocalDB.** Se hicieron en la base desechable `QarePrueba_46`, con la
+intercalación de QA y 92 tickets sintéticos. **No son cifras de QA.** La base ya
+se borró. A = cuerpos originales, B = con `sql/46`, C = después del rollback.
+
+| Validación | Resultado |
+|---|---|
+| H1: `RESPUESTA INVALIDA` devuelve los mismos tickets que `NO EVALUABLE` | A: 0 filas; B: 14, los mismos tickets (diferencia 0); igual con grupo y ventana (0 → 5) y en minúsculas |
+| H1: los demás estados y las corridas sin estado | Iguales en A y B: sin filtros 92, ventana 91, último día 1, `NO EVALUABLE` 14, `TEXTO EVALUABLE` 72, `SIN INFORMACION QARE` 6, estado desconocido 0, grupo 47, firma 26, categoría 30, clasificación 52 |
+| H1: `RESPUESTA ANALIZABLE` | A: 0; B: 72, los mismos que `TEXTO EVALUABLE` |
+| H2: catálogo sin duplicados | La vista completa es igual en A, B y C (`EXCEPT` en los dos sentidos = 0) |
+| H2: duplicados activos equivalentes (`na` y ` NA ` además de `NA`, y `v ` además de `V`, en una transacción que se deshace) | A: 104 filas para 92 tickets, y el Detalle devuelve 104. B: 92 = 92. La clasificación de B con duplicados es igual a la de B sin ellos (0). KPIs: 14 no evaluables en todos los casos (ya usaba `COUNT(DISTINCT)`) |
+| H3: inicio > fin | KPIs en A: una fila con ceros. En B: error 50001, con el mismo mensaje que el Detalle |
+| H3: rangos válidos (sin fechas, ventana, último día, solo inicio, solo fin) | KPIs iguales en A y B (0) |
+| Rollback | Hashes de C = A, y la vista, el Detalle y KPIs de C = A |
+| Rechazos | En otra base sin aprobación no se ejecuta nada. Con KPIs cambiado, con un estado parcial (solo la vista nueva) y con un segundo intento de migración o de rollback, se niega sin tocar nada. Una copia sin BOM leída como cp1252 falla en la postcondición y se deshace: los hashes quedan como en A |
+
+**Riesgos pendientes.**
+- La precondición depende de que los cuerpos que se leyeron de QA (salidas
+  `.rpt`) coincidan carácter por carácter, sin contar los blancos, con lo que hay
+  en QA. Si el script se niega en QA, los hashes que muestra en "antes" dicen
+  qué objeto difiere. Entonces hay que volver a leer ese cuerpo; no se debe
+  forzar.
+- El texto de KPIs se armó a partir de las líneas de 4a, que omiten las líneas
+  en blanco. El hash ignora los blancos. El rollback devuelve el mismo texto sin
+  contar los blancos, pero no el mismo formato.
+- `RESPUESTA ANALIZABLE` cambia de 0 filas a las de texto evaluable. Es el mismo
+  defecto que H1, pero si la pantalla dependiera de recibir 0, cambia lo que ve.
+- En una base sin los objetos de QA, `SET NOEXEC ON` no ejecuta nada, pero
+  SQL Server igual compila el `ALTER VIEW` y muestra un error 208. En QA no pasa.
+- Los SP que leen la vista se recompilan en su siguiente ejecución.
