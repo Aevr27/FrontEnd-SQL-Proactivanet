@@ -808,26 +808,33 @@ Lo que esto cierra:
 - **8.3.5:** Técnicos excluye firma NULL y KPIs no; en la ventana medida no hay
   firmas vacías (12.5), así que hoy cuadra.
 
-### 12.4 Hallazgos de revisión del prototipo (por confirmar con los catálogos)
+### 12.4 Hallazgos de revisión del prototipo (confirmados con los catálogos, 12.7)
 
 1. **Coincidencias exactas frágiles.** Inválidas y `CALIDAD` solo recortan espacios
    y pasan a mayúsculas: `N/A`, `N/A.`, `NA` y `N A` necesitan una fila cada uno.
    La normalización de 11.4 convierte 2 275 textos analizables distintos en claves
-   que agrupan variantes (`diag_qare_patrones.sql` 1).
+   que agrupan variantes (`diag_qare_patrones.sql` 1). **Confirmado:** el catálogo
+   de patrones repite cada frase con y sin acento (`CODIGO CRUZADO` /
+   `CÓDIGO CRUZADO`) y guarda errores de dedo tal como se escribieron
+   (`ERRO DE AUTENTICACIÓN`, `PROBLEMAS DE NAVEAGCION`, `DAN INDICAIONES`).
 2. **Caracteres invisibles.** Hay textos con espacio de ancho cero al inicio
    (`‌SIN RESPUESTA`, `‌SE REINSTALÓ RTE`; `diag_qare_patrones.sql` 1 y 5). Ni la
    igualdad ni `LTRIM` los quitan, así que esas respuestas no coinciden con el
-   catálogo. Medición en `diag_qare_tecnicos_prototipo.sql` 9.
+   catálogo. **Medido:** 82 de 7 651 textos llenos traen espacio de ancho cero;
+   1 trae NBSP; ninguno trae saltos de línea.
 3. **Solo signos:** no quita NBSP, saltos de línea ni `? # ( ) ' "`; un texto
    de solo dígitos (`0` 181, `1` 102 en diag 1) es evaluable salvo que esté en el
    catálogo.
-4. **`PATRON_SOLUCION` por `LIKE` sin límite de palabra:** una frase corta coincidiría
-   dentro de otra palabra (una frase `ROL` atraparía `CONTROL`; falta ver el catálogo). La colación de la base es
-   `CI_AS`: sin distinción de mayúsculas pero **con** acentos, así que
-   `CONFIGURACIÓN` y `CONFIGURACION` necesitan dos frases.
-5. **`LEFT JOIN` al catálogo de inválidas:** si un valor está dos veces (tras
-   `UPPER/TRIM`), el ticket se duplica en los cuatro SP. Comprobación en
-   `diag_qare_tecnicos_prototipo.sql` 6.
+4. **`PATRON_SOLUCION` por `LIKE` sin límite de palabra:** el catálogo usa raíces
+   cortas (`REINICI`, `INSTAL`, `CONFIGUR`, `PERMISO`, `CONTRASEÑA`, `RESET`), así que
+   cualquier mención cuenta como acción: `SIN PERMISOS` o `NO RECUERDA SU CONTRASEÑA`
+   caerían en un patrón. La colación es `CI_AS` (con acentos), de ahí las filas
+   duplicadas del punto 1.
+5. **`LEFT JOIN` al catálogo de inválidas, bug confirmado:** `v` (Id 47) y `V`
+   (Id 48) están activos y son iguales con `CI_AS`. La vista devuelve 9 375 filas
+   para 9 374 tickets. Los tres SP de conteo usan `COUNT(DISTINCT)` y no se
+   enteran; `usp_QARE_DetalleEvidencia` sí muestra el ticket repetido. Basta con
+   desactivar una de las dos filas (cambio de datos, aprobación aparte).
 6. **Filtros dispares entre SP y contra el mockup** (Período, Grupo, Categoría,
    Técnico):
 
@@ -847,6 +854,21 @@ Lo que esto cierra:
    15 y 90 días antes de exponerlos.
 8. **Cuentas que no son personas** (`User, Setup` y demás) salen como filas de la
    tabla por técnico; el mockup las muestra así. Decisión 9.2 sigue abierta.
+9. **Reglas desactivadas dejan sin patrón textos claros y frecuentes:** `CARGA DE`
+   (inactiva) deja `CARGA DE PRECIOS` 48 y `SP CARGA DE PRECIOS` 24; `ALTA SAP`
+   deja `ALTA SAP TIENDA` 31 y `ALTA SAP OAT` 26; `NAVEGACION` deja 31; `CONTACTO`
+   deja `SE BRINDA CONTACTO PARA SEGUIMIENTO` 33. Probablemente se apagaron por
+   coincidir de más; una frase completa las recuperaría sin ese riesgo.
+10. **`ERROR` no es inválida:** la fila `error` del catálogo está inactiva, así que
+    `ERROR` (74 tickets) es el texto "sin patrón" más frecuente.
+11. **Exacto contra parcial:** `CALIDAD` compara igualdad y `PATRON_SOLUCION`
+    `LIKE`, así que el mismo contenido cae distinto según lo que lo rodee:
+    `NUEVA CONTRASEÑA` sola es `RESPUESTA SIN ACCION DOCUMENTADA`, pero
+    `SE ANEXA NUEVA CONTRASEÑA` (18) es `CUENTAS / CREDENCIALES` por `CONTRASEÑA`.
+12. **"Sin respuesta del usuario" en cuatro lugares:** `SIN RESPUESTA` es inválida
+    (121); `SIN RESPUESTA DEL USUARIO` exacta es `CALIDAD` (40); cualquier texto que
+    contenga `SIN RESPUESTA DE USUARIO` es patrón `VALIDACION / SIN INTERVENCION`;
+    `SIN RESPUESTA POR PARTE DE USUARIO` queda sin patrón (7).
 
 ### 12.5 Datos de QA que siguen valiendo
 
@@ -919,15 +941,86 @@ Aunque las reglas sean las del prototipo, estos resultados describen los datos:
 **Detalle (`diag_qare_evidencia.sql`)**: las 12 columnas de origen existen en la
 vista base; `QARe_UsuarioConfirmo` y `Subestado` vacíos al 100 %.
 
+### 12.7 Contenido de los catálogos y lo que clasifica la vista (QA, 12:07)
+
+`diag_qare_tecnicos_prototipo.sql` 4-9, ventana 2026-10-29 a 2026-11-27 (9 374
+tickets: 33 más que a las 11:39 por cierres del mismo día).
+
+**`CatQARE_RespuestaInvalida`** (40 filas): solo 16 activas para
+`QARe_DescripcionSolucion`: `NA`, `N/A`, `SI`, `NO`, `0`, `00`, `1`,
+`SIN RESPUESTA`, `ok`, `a`, `x`, `Z`, `za`, `v`, `V` y el literal `NULL`. Inactivas:
+`.`, `-`, `,`, `-----------`, `error` (el texto hecho solo de signos ya lo atrapa
+`SolucionNoDescriptiva`). Las filas de `QARe_Evidencia` están todas inactivas: la
+vista no evalúa la evidencia.
+
+**`CatQARE_PatronSolucion`** (344 filas):
+
+| Tipo | Patrón | Orden | Reglas activas |
+|---|---|---|---|
+| CALIDAD | PROBLEMA / NO SOLUCION | 5 | 62 |
+| CALIDAD | RESPUESTA SIN ACCION DOCUMENTADA | 6 | 12 |
+| PATRON | frases específicas de varios patrones | 8 | — |
+| PATRON | CUENTAS / CREDENCIALES; ROLES / PERMISOS | 10 | 28; 37 |
+| PATRON | BASE DE DATOS / DML | 20 | 13 |
+| PATRON | SCRIPT / AUTOMATIZACION | 25 | 3 |
+| PATRON | REPROCESO / REENVIO | 30 | 11 |
+| PATRON | REINICIO / REACTIVACION | 40 | 14 |
+| PATRON | CONFIGURACION | 50 | 19 |
+| PATRON | DATOS MAESTROS / CATALOGOS | 55 | 2 |
+| PATRON | ACTUALIZACION / INSTALACION | 60 | 2 |
+| PATRON | MANTENIMIENTO / LIMPIEZA | 65 | 3 |
+| PATRON | HARDWARE / REPARACION | 70 | 23 |
+| PATRON | INDICACIONES / CANALIZACION | 80 | 17 |
+| PATRON | VALIDACION / SIN INTERVENCION | 90 | 21 |
+| PATRON | CARGA / SINCRONIZACION | 100 | 6 |
+| PATRON | CANCELACION / CIERRE OPERATIVO | 110 | 7 |
+| PATRON | CAMBIO ADMINISTRATIVO | 120 | 13 |
+| PATRON | SEGURIDAD / CONECTIVIDAD | 130 | 17 |
+
+Son 18 patrones de solución activos (más `ACCESOS / PERMISOS`, todo inactivo), no
+13. En la ventana tienen tickets los 18; la captura del Pareto con 13 filas y
+99 % corresponde a un `@Top` de 13 (8.1 resuelto).
+
+**Clasificación de la vista en la ventana:**
+
+| Estado | Tipo | Tickets |
+|---|---|---|
+| SIN INFORMACION QARE | — | 1 724 |
+| NO EVALUABLE | — | 2 914 |
+| TEXTO EVALUABLE | CALIDAD | 492 (PROBLEMA 382, SIN ACCION 110) |
+| TEXTO EVALUABLE | PATRON_SOLUCION | 2 302 |
+| TEXTO EVALUABLE | SIN PATRON | 1 942 |
+
+`1 724 + 2 914 + 4 736 = 9 374` y `492 + 2 302 + 1 942 = 4 736`: las
+reconciliaciones 8.3.1 y 8.3.2 cuadran. Inválidas sobre evaluados: 38.1 %
+(2 914 / 7 650); la variante mínima de 11.4 daba 43.4 %.
+
+**Decisiones de negocio que el catálogo ya toma** (preguntas 9.4 y 9.5, en el
+prototipo):
+
+- `NO  SALE ERROR` (218) **no** es inválida: es `PROBLEMA / NO SOLUCION`.
+- Copiar el rótulo del tipo **sí** cuenta como patrón: `SE DAN INDICACIONES,
+  TÉCNICAMENTE NO SE HIZO NADA` (36) es `INDICACIONES / CANALIZACION`; `NO FUE
+  NECESARIO HACER NADA, YA ESTABA SOLUCIONADO` (19) es `VALIDACION / SIN
+  INTERVENCION`.
+- Cierres sin acción como `INCIDENCIA GENERAL RESUELTA` y `CONFIRMAN EL CIERRE DEL
+  TICKET` son patrón `VALIDACION / SIN INTERVENCION`, no incompletos.
+- `SE ANEXA EVIDENCIA`, `NO SE ADJUNTO LO SOLICITADO` y `SIN RESPUESTA DEL USUARIO`
+  son `RESPUESTA SIN ACCION DOCUMENTADA`.
+- Errores operativos (`MATERIALES SIN PMV` 46, `USUARIO BLOQUEANDO` 22,
+  `LEGADO - ITX` 17) son `PROBLEMA / NO SOLUCION`.
+
+El catálogo no dice si esas decisiones están aprobadas o son del prototipo.
+
 ### 12.6 Siguiente paso
 
-1. Correr la versión **actual** de `diag_qare_tecnicos_prototipo.sql` (secciones
-   4-9): contenido de los dos catálogos, duplicados del `LEFT JOIN`, lo que
-   clasifica la vista en la misma ventana y caracteres invisibles. Las secciones
-   1-3 ya se corrieron.
-2. Con eso, comparar la clasificación de Daniela contra 12.5 y escribir la
-   revisión punto por punto de 12.4.
-3. Preguntas al negocio que quedan: si los catálogos de Daniela son la versión
+1. ~~Correr `diag_qare_tecnicos_prototipo.sql` completo~~ (hecho 12:07, 12.7).
+2. Llevar a Daniela la revisión de 12.4 como lista de correcciones al prototipo:
+   el bug `v`/`V` (5), la normalización antes de comparar (1-3), los filtros por SP
+   (6), las reglas desactivadas y `ERROR` (9, 10) y la incoherencia exacto/parcial
+   (11, 12). Son cambios a sus objetos: no se tocan sin su acuerdo y aprobación.
+3. Medir el rendimiento de los cuatro SP con 15 y 90 días (7).
+4. Preguntas al negocio que quedan: si los catálogos de Daniela son la versión
    aprobada, quién los mantiene, el trato de cuentas no persona y proveedores
    (9.2), qué filtros debe respetar cada bloque de la pantalla (12.4.6) y si los
    parámetros siguen la convención QARE (9.11).
