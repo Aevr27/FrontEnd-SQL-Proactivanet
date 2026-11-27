@@ -1436,8 +1436,15 @@ arregla su filtro.
   postcondición.
 - La vista completa da 383 287 filas = 383 287 tickets.
 - El rollback (`46R`) sigue disponible y restauraría ese mismo texto.
-- No se volvieron a ejecutar los SP después de aplicarlo; esa verificación
-  está pendiente.
+- **Verificación posterior en QA** (16:07, ventana del 2026-10-29 al 2026-11-27):
+  - Detalle con `RESPUESTA INVALIDA` = `NO EVALUABLE` = **2 975** filas.
+  - Detalle con `RESPUESTA ANALIZABLE` = `TEXTO EVALUABLE` = **4 802** filas.
+  - KPIs: 9 517 totales, 1 740 sin información, 7 777 evaluados, 2 975 no
+    evaluables (38.25 %) y 4 802 de texto evaluable (61.75 %). Las cifras
+    coinciden con el Detalle y cuadran: 1 740 + 2 975 + 4 802 = 9 517.
+  - KPIs con inicio > fin: error 50001, `La FechaInicio no puede ser mayor que la
+    FechaFin.`
+  - H1, H2 y H3 quedan cerrados en QA.
 
 Archivos: `sql/46_qare_correcciones_detalle_vista_kpis.sql` y
 `sql/46_qare_correcciones_detalle_vista_kpis_rollback.sql`. Usan `ALTER`, así que
