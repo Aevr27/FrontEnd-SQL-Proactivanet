@@ -4,8 +4,10 @@ Estado (2026-11-27): **especificación en revisión; procedimientos NO escritos.
 Nada de este documento está implementado ni aplicado en ninguna base.
 
 Archivos de diagnóstico (solo lectura):
-`sql/diag/diag_qare_tecnicos_perfil.sql` (diag 1, corrido en QA 2026-11-27) y
-`sql/diag/diag_qare_tecnicos_perfil_2.sql` (diag 2, **todavía sin correr**).
+`sql/diag/diag_qare_tecnicos_perfil.sql` (diag 1, corrido en QA 2026-11-27),
+`sql/diag/diag_qare_tecnicos_perfil_2.sql` (diag 2, corrido en QA 2026-11-27 11:02),
+`sql/diag/diag_qare_tecnicos_prototipo.sql` y los seis de la investigación SQL
+(sección 11), **todavía sin correr en QA**.
 
 ## 1. Objetivo y alcance
 
@@ -14,13 +16,18 @@ la calidad de la pregunta abierta del formulario QARE
 (`QARe_DescripcionSolucion`, "Describe la solución aplicada") por ticket, por
 patrón de solución y por técnico.
 
-Tres procedimientos nuevos, que no reemplazan ni alteran los `usp_CorreoQARE_*`:
+Cuatro procedimientos nuevos, que no reemplazan ni alteran los `usp_CorreoQARE_*`:
 
 | SP | Alimenta |
 |---|---|
-| `usp_QARE_PatronesSolucion` | Tarjetas, barra segmentada y Pareto |
+| `usp_QARE_CalidadCaptura_KPIs` | Las cuatro tarjetas |
+| `usp_QARE_PatronesSolucion` | Barra segmentada y Pareto |
 | `usp_QARE_CalidadCaptura_Tecnicos` | Tabla por técnico |
 | `usp_QARE_DetalleEvidencia` | Tabla de evidencia por ticket |
+
+El nombre `usp_QARE_CalidadCaptura_KPIs` lo dio el usuario el 2026-11-27; no
+aparece en las cuatro capturas guardadas. Su salida no se ve en ninguna captura
+(sección 11.6).
 
 Fuera de alcance de este documento: SQL de implementación, cambios al frontend y
 despliegue.
@@ -43,7 +50,16 @@ despliegue.
 
 - **Población:** `dbo.vw_CorreoQARECierre_Base` (envoltorio de `vw_CorreoQA_Base`,
   la misma base que QA). Una fila por `CodigoTicket`: diag 1, 9 310 filas = 9 310
-  tickets distintos.
+  tickets distintos. `vw_CorreoQARECierre_Base` es un `SELECT` de columnas de
+  `vw_CorreoQA_Base` sin filtro propio (diag 2, A).
+- **Alcance heredado de `vw_CorreoQA_Base`** (diag 2, A): lee `dbo.vw_Tickets`; solo
+  `Estado = 'Cerrada'`; excluye los grupos `Datos Maestros%`, `Servicios al personal%`
+  y `SorIA`, y las categorías `Soria%`, `S-Mesa de Servicios al Personal%`,
+  `S-Datos-Maestros%` y `S-Punto de Venta/Aplicativo/Ampliaci%`. `Grupo` vacío sale
+  como `'Sin grupo'`. La pestaña nueva hereda este alcance sin reimplementarlo.
+- **Técnico** (diag 2, A): `Tecnico = COALESCE(NULLIF(TRIM(FirmaSolucion)),
+  NULLIF(TRIM(TecnicoSegundaLinea)), 'Sin tecnico')`: quien firmó la solución y, si
+  no hay firma, el asignado. Es la misma regla que `vw_Dash_ProductividadBase` (SLA).
 - **Fecha:** `FechaFirmaSolucion`; `@FechaFin` inclusivo
   (`>= @Fi AND < DATEADD(DAY,1,@Ff)`).
 - **Default NULL/NULL** de los SP QARE: `@Ff` = hoy en México
@@ -63,8 +79,8 @@ despliegue.
 ## 3. Requisitos visuales recuperados de Daniela
 
 Transcripción de las capturas del 26-nov. Los encabezados de las tablas se leyeron
-ampliando la captura; los nombres son legibles, pero conviene confirmarlos con el
-archivo original de Daniela (sección 10).
+ampliando la captura (releídos el 2026-11-27 con la misma transcripción); son
+legibles, salvo `TicketsSinInfo…`, que está cortado en el original.
 
 ### 3.1 Pantalla (mockup "QARE | Respuestas y patrones de solución")
 
@@ -186,14 +202,12 @@ Diferencias entre mockup y captura (decidir en la revisión):
 - `Tecnico` = `vw_Tickets.TecnicoSegundaLinea` solo en 4 858 (52 %). En los ejemplos
   distintos, `TecnicoSegundaLinea` es NULL o es otra persona y `TecnicoAsignado`
   dice "Sin asignar".
-- En la vista del SLA (`DashboardQueries.cs`) `Tecnico` es la firma de solución con
-  respaldo en el asignado. Para `vw_CorreoQA_Base` **no está verificado**: el cuerpo
-  volvió truncado.
+- Explicación (diag 2): `Tecnico` es la firma de solución, no el asignado (2.2).
 
 **Cuentas que no son personas:** `User, Setup` (646 tickets, 25 grupos),
 `Proactivanet, Customer Service`, `Lexmark, Proveedor`, `Lexmark2, Proveedor`,
 `Soporte, Fenicia`. `dbo.CatCuentaNoPersona` ya existe y SLA y Análisis lo usan
-para sacarlas de lo que habla de personas. Qué cuentas tiene hoy: diag 2, C.
+para sacarlas de lo que habla de personas. Contenido: 4.2, C.
 
 **Captura QARE**
 - 1 712 tickets (18.4 %) sin QARE: `TipoSolucion`, `AplicaOtrosCasos`,
@@ -221,19 +235,59 @@ patrón reconocido en el texto.
 **Catálogo existente:** `CatCausaRaizAgrupador` cubre 105 de 9 310 (1.1 %) y
 `QARe_Causa` nunca empata con él. **Descartado** como fuente de patrones.
 
-### 4.2 Diag 2 — pendiente de correr
+### 4.2 Diag 2 (QA, 2026-11-27 11:02; misma ventana, 9 341 tickets)
 
-`diag_qare_tecnicos_perfil_2.sql` está escrito (commit `8659104`) pero **su salida
-no se ha compartido**. Medirá:
-- **A.** Cuerpo completo de `vw_CorreoQA_Base` y `vw_CorreoQARECierre_Base`, una
-  fila por línea.
-- **B.** Si `Tecnico` = `FirmaSolucion` o = `COALESCE(FirmaSolucion, TecnicoSegundaLinea)`.
-- **C.** Contenido de `CatCuentaNoPersona` y cuentas con forma de cuenta fuera de él.
-- **D1/D2.** Cuántos tickets caen en cada regla candidata de "inválida" (cascada
-  excluyente: vacío; sin letras; literal genérico; copia de `QA_MensajeError`;
-  copia del tipo; menos de 10 caracteres; copia de `SolucionUsuario`), con ejemplos.
-  **Son hipótesis para decidir, no reglas.**
-- **D3.** Tickets sin captura por técnico.
+La población creció de 9 310 a 9 341 entre corridas del mismo día: son tickets
+cerrados en el intervalo. Los porcentajes no cambian de forma apreciable.
+
+**A. Definiciones:** ver 2.2 (alcance y regla de `Tecnico`).
+
+**B. Origen de `Tecnico`:** igual a `FirmaSolucion` en 9 341 de 9 341; `FirmaSolucion`
+vacía en 0; igual a `TecnicoSegundaLinea` en solo 4 876. En este periodo, agrupar por
+`Tecnico` o por `FirmaSolucion` (como el prototipo de Daniela) da lo mismo. `Tecnico`
+además tiene respaldo definido si algún día la firma viene vacía.
+
+**C. Cuentas que no son personas.**
+
+`dbo.CatCuentaNoPersona` (8 cuentas, todas `Habilitado = 1`):
+
+| Cuenta | Tipo | Tickets en el periodo |
+|---|---|---|
+| `User, Setup` | Automatizacion | 648 |
+| `Proactivanet, Customer Service` | Automatizacion | 99 |
+| `MAC, Mesa` | Generica | 5 |
+| `Desk, Smart` | Automatizacion | 1 |
+| `Energeticos, Control`, `NetLogistik, NetLogistik Soporte`, `Operaciones, Operaciones`, `Soriana, Consulta` | Generica / Proveedor | 0 |
+
+Cuentas con forma de cuenta que **no** están en el catálogo (457 tickets):
+`Lexmark, Proveedor` 109, `Soporte, Fenicia` 90, `Lexmark2, Proveedor` 85,
+`Transnetwork, Proveedor` 63, `Bizerba, Proveedor` 35, `Sonda, Proveedor` 24,
+`Mexba, Proveedor` 21, `Berkel, Proveedor` 12, `Realfix, Proveedor` 10,
+`Honeywell, Proveedor` 7, `PCM, Proveedor` 1. Son cuentas de proveedor que sí
+capturan QARE (p. ej. `Bizerba` 1 de 35 sin captura), así que excluirlas no es
+automático (9.2).
+
+**D1. Cascada candidata de "inválida"** (excluyente, gana la primera; **hipótesis,
+no reglas**):
+
+| Regla | Tickets | % de 9 341 | Técnicos | Lectura de los ejemplos (D2) |
+|---|---|---|---|---|
+| R0 sin captura / vacío | 1 715 | 18.36 | 17 | Igual a "sin información QARE" (1 712 en diag 1). |
+| R1 sin letras (`.`, `-`, `0`, `1`, `,`) | 1 651 | 17.67 | 34 | Basura evidente. |
+| R2 literal genérico (`N/A`, `NA`, `NO`, `SI`, `SIN RESPUESTA`, `NO  SALE ERROR`…) | 1 636 | 17.51 | 44 | Basura evidente. |
+| R3 copia de `QA_MensajeError` | 8 | 0.09 | 4 | **Respuestas con contenido** (`DESBLOQUEO DE USUARIO`, `LIBERACIÓN DE PRESUPUESTO`). La regla las marcaría mal. |
+| R4 copia del rótulo del tipo declarado | 66 | 0.71 | 4 | Repite el catálogo ("Se dan indicaciones, técnicamente no se hizo nada" 36, "No fue necesario hacer nada…" 19, "Se otorgan permisos" 10): no agrega nada al tipo declarado. |
+| R5 menos de 10 caracteres | 231 | 2.47 | 39 | **Mezcla**: basura (`X`, `N`, `FF`, `AN`, `NO APLICA`) y palabras con significado (`REINICIO` 21, `PINPAD`, `GAVETA`, `BASCULA`, `DOMINIO`). El largo no separa. |
+| R6 copia de `SolucionUsuario` | 213 | 2.28 | 15 | **Soluciones reales** (`SE RESETEA PERFIL VIRTUAL`, `SE EJECUTAN POLITICAS DE WINDOWS`, textos largos de básculas). La regla las marcaría mal. |
+| Z pasa todas | 3 821 | 40.91 | 84 | Incluye patrones claros (`CARGA DE PRECIOS`, `PERMISOS ADICIONALES TIENDA`, `SE REINICIA SERVICIOS DE EHUB`) y frases sin acción (`SE BRINDA CONTACTO PARA SEGUIMIENTO`, `INCIDENCIA GENERAL RESUELTA`, `CONFIRMAN EL CIERRE DEL TICKET`, `SE DAN INDICACIONES`). |
+
+**D3. Sin captura por técnico:** muy concentrado. Cuatro firmas suman 1 672 de los
+1 715 sin captura (97.5 %): dos técnicos de un solo grupo cada uno (83 % y 89 % de
+sus tickets sin captura) y las cuentas `User, Setup` (91 %) y `Proactivanet,
+Customer Service` (92 %). El resto de los técnicos tiene entre 0 % y 17 %. Parece
+hábito o flujo de captura de esas firmas, no una falla general del formulario.
+**Sin verificar** si el grupo de esos dos técnicos cierra por un flujo que no muestra
+el formulario QARE.
 
 ## 5. Definiciones y reglas confirmadas
 
@@ -253,6 +307,8 @@ Confirmado por Daniela (capturas) o verificado en datos:
    documenta una acción". Es una definición funcional; **la regla que la detecta
    no está definida** (pendiente 9.5).
 7. La tabla por técnico se agrupa por `FirmaSolucion` en el prototipo de Daniela.
+   En la base, `Tecnico` = `COALESCE(FirmaSolucion, TecnicoSegundaLinea, 'Sin tecnico')`
+   y coincide con `FirmaSolucion` en el 100 % del periodo medido (diag 2, B).
 8. Población, fecha, default, escala de % y convención de filtros: sección 2.2.
 9. `QARe_UsuarioConfirmo` no se usa (100 % NULL).
 10. `CatCausaRaizAgrupador` no es el catálogo de patrones.
@@ -265,7 +321,7 @@ lo que dice el prototipo de Daniela está en la sección 8.
 | # | Estado (`EstadoDescripcionVisual`) | Condición propuesta | Fuente de la condición |
 |---|---|---|---|
 | 1 | `SIN INFORMACION QARE` | Sin captura QARE (`QARe_DescripcionSolucion` y `QARe_TipoSolucion` NULL) | Diag 1: van NULL juntos. **Definición exacta pendiente (9.1).** |
-| 2 | `RESPUESTA INVALIDA` | El texto no es evaluable | Reglas candidatas D1 del diag 2. **Pendiente (9.4).** |
+| 2 | `RESPUESTA INVALIDA` | El texto no es evaluable | Reglas candidatas D1 del diag 2. **Pendiente (9.4).** Propuesta técnica según 4.2: R1 + R2 (con la lista de literales ampliada con `NO APLICA`, `X`, `N`…) + quizá R4; no R3, R5 ni R6. Con esa base serían de 3 287 (R1 + R2) a ~3 400 inválidas (más R4 y la basura de R5, que D1 no separa) y de ~4 230 a 4 339 analizables, sobre 9 341 tickets con 1 715 sin captura. |
 | 3 | `RESPUESTA ANALIZABLE` | Todo lo demás | Complemento de 1 y 2 dentro del total. |
 
 Dentro de `RESPUESTA ANALIZABLE`, una sola `ClasificacionRespuesta`:
@@ -287,22 +343,21 @@ En los dos casos, "Regla detectada" del mockup sería la frase que coincidió.
 
 ## 7. Matriz de indicadores, campos y denominadores
 
-| Indicador | `usp_QARE_PatronesSolucion` | `usp_QARE_CalidadCaptura_Tecnicos` | `usp_QARE_DetalleEvidencia` | Denominador del % |
-|---|---|---|---|---|
-| Total de tickets | **sin nombre en las capturas** (pendiente 9.10) | `TicketsTotales` | `COUNT(*)` | — |
-| Sin información QARE | **sin nombre** (9.10) | `TicketsSinInfo…` (nombre cortado) | `EstadoDescripcionVisual = 'SIN INFORMACION QARE'` | — |
-| Evaluados | — | `TicketsEvaluados` | estado ≠ sin información | — |
-| Respuestas inválidas | **sin nombre** (9.10) | `TicketsNoEvaluables`, `PctNoEvaluable` | `= 'RESPUESTA INVALIDA'` | `TicketsEvaluados` (8.1) |
-| Respuestas analizables | `TotalTextoEvaluable` | `TicketsTextoEvaluable`, `PctTextoEvaluable` | `= 'RESPUESTA ANALIZABLE'` | `TicketsEvaluados` (8.1) |
-| Patrón reconocido | `TicketsConPatron`, `PctConPatron` | `TicketsConPatron`, `PctConPatron` | `ClasificacionRespuesta` = patrón | `TotalTextoEvaluable` |
-| Respuesta incompleta | `TicketsCalidad`, `PctCalidad` | `TicketsCalidad`, `PctCalidad` | `ClasificacionRespuesta` = incompleta | `TotalTextoEvaluable` |
-| Sin patrón identificado | `TicketsSinPatron`, `PctSinPatron` | `TicketsSinPatron`, `PctSinPatron` | `ClasificacionRespuesta` = sin patrón | `TotalTextoEvaluable` |
-| Pareto | `Posicion, PatronSolucion, Tickets, Porcentaje, TicketsAcumulados, PctAcumulado` | — | — | `Porcentaje` y `PctAcumulado` sobre `TicketsConPatron` (8.1) |
-| Técnico | — | `FirmaSolucion` | `FirmaSolucion` | — |
+| Indicador | `usp_QARE_CalidadCaptura_KPIs` | `usp_QARE_PatronesSolucion` | `usp_QARE_CalidadCaptura_Tecnicos` | `usp_QARE_DetalleEvidencia` | Denominador del % |
+|---|---|---|---|---|---|
+| Total de tickets | **sin nombre en las capturas** (9.10) | — | `TicketsTotales` | `COUNT(*)` | — |
+| Sin información QARE | **sin nombre** (9.10) | — | `TicketsSinInfo…` (nombre cortado) | `EstadoDescripcionVisual = 'SIN INFORMACION QARE'` | — |
+| Evaluados | — | — | `TicketsEvaluados` | estado ≠ sin información | — |
+| Respuestas inválidas | **sin nombre** (9.10) | — | `TicketsNoEvaluables`, `PctNoEvaluable` | `= 'RESPUESTA INVALIDA'` | `TicketsEvaluados` (8.1) |
+| Respuestas analizables | **sin nombre** (9.10) | `TotalTextoEvaluable` | `TicketsTextoEvaluable`, `PctTextoEvaluable` | `= 'RESPUESTA ANALIZABLE'` | `TicketsEvaluados` (8.1) |
+| Patrón reconocido | — | `TicketsConPatron`, `PctConPatron` | `TicketsConPatron`, `PctConPatron` | `ClasificacionRespuesta` = patrón | `TotalTextoEvaluable` |
+| Respuesta incompleta | — | `TicketsCalidad`, `PctCalidad` | `TicketsCalidad`, `PctCalidad` | `ClasificacionRespuesta` = incompleta | `TotalTextoEvaluable` |
+| Sin patrón identificado | — | `TicketsSinPatron`, `PctSinPatron` | `TicketsSinPatron`, `PctSinPatron` | `ClasificacionRespuesta` = sin patrón | `TotalTextoEvaluable` |
+| Pareto | — | `Posicion, PatronSolucion, Tickets, Porcentaje, TicketsAcumulados, PctAcumulado` | — | — | `Porcentaje` y `PctAcumulado` sobre `TicketsConPatron` (8.1) |
+| Técnico | — | — | `FirmaSolucion` | `FirmaSolucion` | — |
 
-Las cuatro tarjetas y la barra salen de `usp_QARE_PatronesSolucion`, pero las
-capturas solo muestran el result set de la barra y el del Pareto. Falta decidir si
-las tarjetas son un tercer result set o se suman de la tabla por técnico (9.10).
+Las tarjetas tienen su propio SP; las capturas solo muestran los result sets de
+la barra, el Pareto, la tabla por técnico y el detalle.
 
 ## 8. Reconciliación de poblaciones
 
@@ -363,16 +418,30 @@ aprobar 9.1 y 9.4-9.6.
    respuestas inválidas o solo en "Sin información QARE"? El prototipo de Daniela
    los deja fuera (8.1): falta confirmarlo. También falta la definición exacta de
    "sin captura": ¿solo `QARe_DescripcionSolucion` NULL o todos los campos QARE NULL?
+   (En datos dan casi lo mismo: R0 = 1 715 y todos-NULL = 1 712.) Dato para decidir:
+   el 97.5 % de los sin captura viene de cuatro firmas (4.2, D3); contarlos como
+   inválidos cargaría a esos técnicos con un problema de captura, no de redacción.
 2. **Cuentas que no son personas:** ¿se excluyen de la tabla por técnico `User,
    Setup` y las demás de `dbo.CatCuentaNoPersona`? Ojo: el mockup muestra `User,
-   Setup` y `Mexba, Proveedor` como filas.
-3. **Identidad del técnico:** el prototipo agrupa por `FirmaSolucion`. ¿Se usa
-   `FirmaSolucion` tal cual (¿y qué pasa si viene vacía?) o `Tecnico` (que en el SLA
-   es firma con respaldo en el asignado)? El diag 2 B mide la diferencia.
-4. **Respuesta inválida:** ¿qué reglas candidatas del diag 2 (D1) se aprueban y qué
-   literales forman la lista de genéricos?
+   Setup` y `Mexba, Proveedor` como filas. Y aparte: ¿las 11 cuentas de proveedor
+   fuera del catálogo (457 tickets, 4.2 C) cuentan como técnicos? Sí capturan QARE.
+   Si se excluyen, ¿se dan de alta en el catálogo? Es un cambio de datos que también
+   afecta a SLA y Análisis.
+3. **Identidad del técnico:** casi cerrada. `Tecnico` es la firma de solución con
+   respaldo en el asignado y es igual a `FirmaSolucion` en el 100 % del periodo
+   (4.2 B). Propuesta: calcular con `Tecnico` y devolver la columna con el nombre del
+   prototipo, `FirmaSolucion`. Solo falta el visto bueno a ese nombre.
+4. **Respuesta inválida:** ¿qué reglas candidatas se aprueban y qué literales
+   forman la lista de genéricos? Datos en 4.2 D1/D2: R1 y R2 son basura evidente;
+   R3 y R6 marcarían mal respuestas con contenido; R5 (largo) mezcla basura con
+   palabras útiles; R4 (copiar el rótulo del tipo) es decisión de negocio:
+   ¿inválida o incompleta?
 5. **Respuesta incompleta:** ¿qué regla detecta "solo describe el problema o no
    documenta una acción"? ¿Lista de frases, ausencia de verbo de acción, otra?
+   Candidatas vistas en el grupo Z: `SE BRINDA CONTACTO PARA SEGUIMIENTO`,
+   `INCIDENCIA GENERAL RESUELTA`, `CONFIRMAN EL CIERRE DEL TICKET`,
+   `SE DAN INDICACIONES`; y las palabras sueltas de R5 (`REINICIO`, `PINPAD`):
+   ¿incompletas o patrón?
 6. **Catálogo de patrones:** ¿se adoptan los 13 grupos del prototipo de Daniela?
    ¿Quién valida qué textos pertenecen a cada uno?
 7. **Categoría:** ¿el filtro usa la ruta completa, la raíz (C1, como QARE) o un
@@ -380,8 +449,11 @@ aprobar 9.1 y 9.4-9.6.
 8. **Parámetros definitivos** comunes a los tres SP (propuesta en 9.11).
 9. **Un ticket con dos patrones:** ¿gana el primero por prioridad o cuenta en ambos?
    Si cuenta en ambos, el Pareto deja de sumar `P` y se rompe la prueba 8.3.4.
-10. **Tarjetas:** nombre de las columnas de Total, Sin información e Inválidas en
-    `usp_QARE_PatronesSolucion` (no aparecen en las capturas).
+10. **Tarjetas:** salen de `usp_QARE_CalidadCaptura_KPIs`, pero ninguna captura
+    muestra sus columnas. Propuesta técnica: los mismos nombres que la tabla por
+    técnico (`TicketsTotales`, `TicketsSinInfo…`, `TicketsNoEvaluables`,
+    `TicketsTextoEvaluable`), para que la prueba 8.3.5 compare columna con
+    columna. Falta el visto bueno y el nombre completo de `TicketsSinInfo…`.
 11. **Parámetros propuestos:** `@FechaInicio DATE = NULL`, `@FechaFin DATE = NULL`
     (inclusivo), `@Grupos NVARCHAR(MAX) = NULL`, `@Categorias NVARCHAR(MAX) = NULL`
     (según 9.7), `@Tecnicos NVARCHAR(MAX) = NULL` (listas por comas, NULL = todo). El
@@ -390,15 +462,23 @@ aprobar 9.1 y 9.4-9.6.
 12. **Detalle:** ¿`EstadoDescripcionVisual` visible (captura) o en la expansión
     (mockup)? ¿Se agrega "Regla detectada"?
 13. ¿Las cinco columnas por técnico se muestran solo como conteo o también con su %?
+14. **Sin captura concentrado:** ¿el grupo de los dos técnicos con 83-89 % sin
+    captura cierra por un flujo donde no aparece el formulario QARE? Si es así, ¿se
+    excluye ese flujo o se muestra tal cual?
 
 ## 10. Riesgos y validaciones antes de crear los SP
 
-- **Pedir a Daniela el código de su prototipo.** Las capturas son salidas reales de
-  SSMS (se ve "Return Value"), con estados y patrones ya calculados. Sus SP o
-  consultas contienen las reglas de 9.1 y 9.3-9.6. Con ese código la mayoría de las
-  preguntas se cierran leyendo, no decidiendo.
-- **Correr el diag 2** en QA (sección 4.2): cierra el origen de `Tecnico`, el
-  contenido de `CatCuentaNoPersona` y da cifras para las reglas de inválida.
+- **Código del prototipo de Daniela.** Las capturas son salidas reales de SSMS
+  (se ve "Return Value"), con estados y patrones ya calculados: sus SP existen en
+  alguna base. Antes de pedírselo, `diag_qare_objetos_fuentes.sql` (1b y 1c) los
+  busca en todas las bases a las que la cuenta tiene acceso y
+  `diag_qare_tecnicos_prototipo.sql` imprime su cuerpo. Solo si no aparecen se le
+  pide. Con ese código la mayoría de las preguntas se cierran leyendo, no decidiendo.
+- ~~Correr el diag 2~~ (hecho 2026-11-27, 4.2).
+- **Reglas por lista literal** (R2 y las de incompleta) son frágiles: cada técnico
+  inventa su variante (`NA`, `N/A`, `NO APLICA`). Hay que normalizar el texto
+  (mayúsculas, sin acentos, espacios dobles, puntuación final) antes de comparar y
+  revisar la lista con cada periodo nuevo.
 - **Confirmar los encabezados** de 3.4 y 3.5 con el archivo original: los nombres
   se leyeron de una captura ampliada; `TicketsSinInfo…` está cortado y el borde del
   resalte de `Validacion` es dudoso.
@@ -410,3 +490,223 @@ aprobar 9.1 y 9.4-9.6.
 - **DDL:** el catálogo de patrones requiere crear tablas. Script, rollback y
   aprobación aparte; nada se aplica sin autorización.
 - **No tocar** `usp_CorreoQARE_*`, `tvf_CorreoQARE_Base` ni la pestaña QARE actual.
+
+## 11. Investigación SQL (2026-11-27)
+
+Objetivo: agotar la evidencia técnica (base, repositorios, ETL, capturas) antes de
+llevar preguntas al negocio. **Los seis scripts de 11.4 no se han corrido en QA.**
+Lo que sigue separa lo verificado en código o en corridas anteriores de lo que
+espera esas corridas.
+
+### 11.1 Fuentes identificadas
+
+Además de las de 2.1 y 2.2:
+
+| Fuente | Qué aporta | Verificado en |
+|---|---|---|
+| `dbo.vw_CorreoQA_Base` | Base de la vista QARE. Trae `TecnicoAsignado`, que `vw_CorreoQARECierre_Base` no expone. | `esquema_bd/02_columnas.tsv`, diag 2 A |
+| `dbo.vw_Tickets` | Campos fuera de la vista QARE: `TecnicoSegundaLinea`, `CausaRaizFenix`, `CausaRaizGrupos`, `Lider`. | `esquema_bd/02_columnas.tsv` |
+| `dbo.vw_Dash_ProductividadBase` (SLA) | `Tecnico`, `TecnicoResolvio`, `EsPersona`: la atribución del tablero SLA. | `esquema_bd/02_columnas.tsv`, `DashboardQueries.cs` |
+| `dbo.usp_CorreoQARE_Detalle` | Una fila por ticket, 50 columnas y seis banderas calculadas (`EsRecurrente`, `UsuarioConfirmo`, `EsCasoReutilizable`, `EsPotencialKB`, `EsInconsistenciaConfirmacionQA`, `EsOportunidadKB`). Lo usa el export QARE. | `App_Code/QareExportar.cs` |
+| `usp_CorreoQARE_KB`, `_OportunidadesKB`, `_RecurrentesAplicacion` | SP QARE que no están en `sql/16` ni en ningún repositorio. | `esquema_bd/01_objetos.tsv` (cuerpos truncados) |
+| `dbo.CatAgenteTecnico` (20 filas), `CatAgenteTecnicoAlias` (2), `vw_TecnicoAgente` | Agentes de Call Center con extensión y nombres viejos. **No** es un catálogo de técnicos: solo cubre a quien tiene extensión. Sirve para detectar alias. | `esquema_bd/06_filas.tsv`, `DASHBOARD.md` |
+| `dbo.AnalisisRegla` + `analisis/motor.js` | Clasificador de texto por frases (sección 11.3). | `sql/47`, `sql/79`, `sql/80`, `motor.js` |
+| ETL (`Integracion_SQL-Proactivanet/01_esquema_proactivanet.sql`, `generar_sql.py`) | Texto de cada pregunta del formulario y la carga: `QARe_DescripcionSolucion = NULLIF(s.QARe_DescripcionSolucion, '')`, sin recortar; las respuestas cortas (`AplicaOtrosCasos`, `GenerarArticulo`, `VerificoClasificacion`) sí se recortan. | Código del ETL |
+| `sql/10_qa_web.sql` | `Validacion` = validación de la **categoría** del ticket en QA (`OK / Valido / Incorrecto / Sin catalogo`). No mide el texto QARE: en el detalle es contexto, no calidad. | Cabecera del script |
+
+Consecuencia del ETL: un texto de solo espacios llega como no NULL. Es una
+explicación posible de R0 = 1 715 contra 1 712 con todo NULL (diag 1 y 2), **sin
+verificar**; `diag_qare_kpis.sql` sección 3 lo mide (S1 contra S2).
+
+### 11.2 Objetos reutilizables
+
+| Objeto | Para qué | SP |
+|---|---|---|
+| `vw_CorreoQARECierre_Base` | Población (2.2) | Los cuatro |
+| `tvf_CorreoQARE_Base` | Filtros C1 / Grupo / Líder y su convención | Los cuatro (si se mantienen esos filtros, 9.11) |
+| `fn_CorreoBacklog_SplitList`, `fn_CorreoBacklog_CategoriaC1`, `CatLiderGrupo` | Listas por comas, C1, líder | Los cuatro |
+| `CatCuentaNoPersona` | Marcar cuentas que no son personas | Técnicos |
+| Estructura de `usp_CorreoQARE_CausaRaiz` | Pareto | Patrones |
+| Método de `motor.js` / `AnalisisRegla` | Coincidencia de frases sobre texto normalizado | Patrones, y quizá incompleta |
+
+### 11.3 Lógica ya implementada
+
+1. **No existe ninguna regla de validez de texto.** Búsqueda en `claude-branch`
+   (JS, C#, SQL), en `Integracion_SQL-Proactivanet` y en los cuerpos truncados de
+   `esquema_bd/`: no hay listas de genéricos, umbrales de largo ni verificación de
+   letras sobre `QARe_*`. Falta confirmarlo en los cuerpos completos de la base
+   (`diag_qare_objetos_fuentes.sql` 3c y 4), sobre todo `EsOportunidadKB` y
+   `EsPotencialKB` de `usp_CorreoQARE_Detalle`, las únicas banderas que podrían
+   mirar el texto.
+2. **Única normalización de texto en QARE:** `UPPER(LTRIM(RTRIM(x))) IN (N'SI', N'SÍ')`
+   en `usp_CorreoQARE_KPIs` y `_ConfirmacionVsQA`.
+3. **Denominadores:** `usp_CorreoQARE_KPIs` divide cada % entre los tickets que
+   contestaron esa pregunta (`TicketsConRespuesta*`), no entre el total. Es la
+   misma convención que el prototipo de Daniela (`PctNoEvaluable` sobre
+   `TicketsEvaluados`, 8.1).
+4. **Cuentas que no son personas — dos precedentes distintos:**
+   - SLA (`DashboardQueries.cs`): `CatCuentaNoPersona.Cuenta = b.Tecnico` exacto.
+     Salen solo de lo que habla de personas (gráfica por técnico, ranking,
+     técnicos activos); **siguen** en volúmenes y SLA, en la tarjeta
+     "Automatizado". Sin la tabla, respaldo fijo `'Desk, Smart'`, `'User, Setup'`.
+   - Análisis (`sql/47`): compara contra `FirmaSolucion` con NBSP convertido y
+     recortado; excluye el ticket entero y lo cuenta en `ExcluidosCuenta`.
+   - SLA "Sin proveedores" excluye **grupos** `Proveedor%`, no cuentas.
+5. **Clasificación de texto en Análisis** (`motor.js`): normaliza (minúsculas, sin
+   acentos, todo lo que no sea letra, número o `:` a espacio), recorre reglas
+   ordenadas y **gana la primera**; cada regla es una lista de frases sobre título +
+   descripción (D), solución (S) o ambas (DS); lo que no coincide va a
+   "Sin clasificar" (R99). Las reglas son por servicio y miran `SolucionUsuario`,
+   no el texto QARE. Dos motivos se repiten entre servicios: "Cerrado sin
+   respuesta" y "Duplicado". El **método** sirve para patrones; las frases no.
+6. **Atribución del técnico:** 2.2 y diag 2 B. `Tecnico` = `FirmaSolucion` en el
+   100 % del periodo; el SLA usa la misma regla.
+
+### 11.4 Consultas de diagnóstico creadas
+
+Todas en `sql/diag/`. Solo `SELECT`; la única escritura es la tabla temporal `#Q`
+de la sesión (se borra al final). Ventana fija 2026-10-29 a 2026-11-27, la de los
+diag 1 y 2. Los cinco últimos comparten un bloque base idéntico: normalización
+(equivalente a `motor.js`), listas candidatas y una clasificación candidata
+excluyente:
+
+| Escalón | Condición | Respaldo |
+|---|---|---|
+| `S` | Texto vacío | Diag 1 y 2 |
+| `I1` sin letras / `I2` lista G1 (no-respuesta) / `I3` lista G3 (frase de formulario) | Basura evidente | Ejemplos D2 del diag 2 |
+| `Q1` copia del tipo / `Q2` lista G2 (solo estado: `RESUELTO`, `ATENDIDO`…) / `Q3` < 10 caracteres / `Q4` copia de `QA_MensajeError` / `Q5` copia de `SolucionUsuario` | Dudosas | Q3-Q5 traen respuestas con contenido (diag 2) |
+| `A` | Resto | — |
+
+| Script | Investiga |
+|---|---|
+| `diag_qare_objetos_fuentes.sql` | Inventario de objetos; los cuatro SP nuevos y `usp_QARE_*` en **otras bases** (prototipo de Daniela); columnas; dependencias hacia abajo de `vw_CorreoQARECierre_Base` y hacia arriba de las fuentes; módulos que mencionan campos QARE, `'N/A'`, `LEN` o `PATINDEX`; **cuerpos completos** por línea de los módulos que leen el texto QARE y de `vw_Dash_ProductividadBase`, `vw_TecnicoAgente`, `usp_CorreoQA_PorTecnico`; parámetros de los SP vecinos; índices de `dbo.Tickets`; contenido de catálogos y de `AnalisisRegla`. |
+| `diag_qare_kpis.sql` | Patrón de llenado de los 8 campos QARE; cinco definiciones de "sin información"; denominadores actuales; las cuatro tarjetas con variante mínima y máxima de inválida y la prueba `T = S + I + A`; estabilidad por día; si la falta de captura es un flujo (Tipo, Subestado, revocación, reapertura, `Validacion`, grupo) o un hábito; por C1. |
+| `diag_qare_patrones.sql` | Textos y palabras más repetidos tras normalizar; cuántos textos cubren el 50/80/90 %; arranques ("SE REINICIA"); variantes de escritura; `TipoSolucion`, `Causa` y `Evidencia`; semillas sacadas del **nombre** de los 13 patrones: cobertura, tickets con 0/1/2+ patrones, empates, Pareto candidato con la forma del contrato, lo que queda sin patrón, tipo declarado × patrón; frases de `AnalisisRegla` sobre el texto QARE. |
+| `diag_qare_tecnicos.sql` | `Tecnico` contra `FirmaSolucion`, `TecnicoSegundaLinea`, `TecnicoAsignado`, `ResponsableUltimaModificacion` y el técnico del SLA; quién firma tickets de otro; nombres escritos de varias formas; U+FFFD y NBSP; alias; comparación exacta (SLA) contra normalizada (Análisis) de `CatCuentaNoPersona`; tabla por técnico con la forma del prototipo y su reconciliación con el global; volumen por firma; técnicos en varios grupos; concentración de cada escalón por firma. |
+| `diag_qare_evidencia.sql` | Existencia de las 12 columnas de origen del detalle; llenado, distintos y largo de las 39 columnas de la vista; literales de las respuestas cerradas; forma de `QARe_Evidencia` (liga, archivo, "adjunto", igual a la descripción); texto que repite un campo declarado; tipo declarado × verbo de acción; cinco tickets por escalón (sin nombre); llenado de campos que solo están en `vw_Tickets`. |
+| `diag_qare_reglas_calidad.sql` | 14 criterios por separado (los cinco del diag anterior desdoblados, más una palabra, verbo de acción, palabra de problema); solapamientos; la cascada con ejemplos; barrido de umbral de largo (3 a 30) separando lo que ya era basura de lo marcado solo por largo; candidatos a la lista de genéricos; señales de incompleta; frases de cierre sin acción; estabilidad semanal. |
+
+Comprobación hecha: los seis corrieron sin errores en LocalDB contra una base
+desechable con vistas de prueba (12 tickets inventados) que reproducen las
+columnas de QA. Eso valida sintaxis, colaciones y que la clasificación se comporta
+como se describe (p. ej. `DESBLOQUEO DE USUARIO` copiado del mensaje de error cae
+en `Q4`, no en inválida; `Perez` y `Pérez` se detectan como el mismo nombre). **No**
+dice nada de los datos reales.
+
+Los textos literales no ASCII van como `NCHAR()`: SSMS puede abrir un `.sql` UTF-8
+sin BOM como cp1252 y romper los literales (mismo tipo de falla que
+`BacklogCategorias.cs`).
+
+### 11.5 Resultados relevantes hasta hoy
+
+Los de los diag 1 y 2 (sección 4) siguen siendo los únicos con datos de QA. De la
+revisión de código y capturas de esta sesión:
+
+- Las capturas confirman los encabezados de 3.4 y 3.5; no muestran la salida de
+  las tarjetas.
+- Ninguna regla de inválida, incompleta o patrón existe en el código revisado
+  (11.3.1).
+- El export de 2026-10-13 no tenía índice de `dbo.Tickets` con
+  `FechaFirmaSolucion` como llave; `IX_Tickets_CorreoQA_FechaCategoriaGrupo`
+  empieza por `FechaRegistro`. Los SP QARE filtran por `FechaFirmaSolucion`, así
+  que recorren la tabla. Medido antes: `usp_CorreoQARE_Detalle` 1.1 s (15 días) y
+  3.8 s (30 días) (`QareExportar.cs`). Hay que confirmar con la sección 6 del diag
+  de objetos y medir los SP nuevos, que además normalizan texto.
+
+### 11.6 Reglas candidatas respaldadas por datos (no aprobadas)
+
+| Regla | Evidencia | Lectura |
+|---|---|---|
+| Sin información = texto abierto vacío | 1 715 (trim) contra 1 712 (todo NULL); los 4 textos se llenan juntos en 7 595 de 7 598 | Robusta; la diferencia es de 3 tickets. |
+| Inválida = sin letras + lista de no-respuesta + frases de formulario | R1 + R2 = 3 287; los ejemplos son basura | Respaldada. La lista exacta es de negocio. |
+| No marcar inválida la copia de `SolucionUsuario` ni de `QA_MensajeError` | R3 y R6: los ejemplos son soluciones reales | Respaldada **en contra** de la regla. |
+| No usar el largo como regla | R5 mezcla `X`, `NO APLICA` con `REINICIO`, `PINPAD`, `BASCULA` | Respaldada en contra; el barrido de `diag_qare_reglas_calidad.sql` 4 lo cuantifica. |
+| Copia del tipo declarado | 66 tickets; no agrega información | Dato claro; inválida o incompleta es de negocio. |
+| Patrones por frases normalizadas, gana la primera | Método probado en Análisis; textos cortos repetidos con significado | Viable; cobertura y empates por medir (`diag_qare_patrones.sql` 4). |
+| Incompleta = sin verbo de acción o solo problema | Frases del grupo Z del diag 2 | Hipótesis sin medir (`diag_qare_reglas_calidad.sql` 6). |
+
+### 11.7 Reconciliación
+
+Relaciones que deben cumplirse (de la aritmética del prototipo, 8.1):
+
+```
+T = S + E                      E = I + A          A = TotalTextoEvaluable
+A = P + C + N                  (excluyentes: cada analizable en uno solo)
+PctConPatron + PctCalidad + PctSinPatron = 100   (sobre A)
+SUM(Pareto.Tickets) = P        último PctAcumulado = 100
+S ∩ I = ∅                      N ⊄ I  (sin patrón no es inválida)
+```
+
+Lo que los datos y el diseño permiten o impiden:
+
+1. **`T = S + I + A`** cuadra por construcción con cualquier cascada excluyente;
+   `diag_qare_kpis.sql` 5 lo comprueba con las dos variantes.
+2. **`A = P + C + N` al 100 %** solo si P, C y N son excluyentes. No lo son de
+   forma natural: "SE DAN INDICACIONES" encaja en el patrón INDICACIONES /
+   CANALIZACION y a la vez en "no documenta una acción". Hace falta un orden
+   (¿patrón antes que incompleta o al revés?). El prototipo de Daniela cuadra
+   exacto (134 = 78 + 0 + 56), así que ella aplica algún orden.
+3. **Un ticket con dos patrones** rompe `SUM(Pareto) = P` si cuenta dos veces.
+   `diag_qare_patrones.sql` 4b mide cuántos hay; 4d arma el Pareto con "gana el
+   primero" y comprueba la suma.
+4. **Redondeo:** tres `DECIMAL(6,2)` redondeados por separado pueden sumar 99.99
+   o 100.01. Decisión técnica: aceptar ± 0.02 (prueba 8.3.3) o calcular el
+   último como 100 menos los otros dos.
+5. **Cuentas que no son personas:** si se quitan de la tabla por técnico pero no
+   de las tarjetas (precedente SLA), la suma por técnico ≠ global por exactamente
+   sus tickets; hay que reportarlos aparte para que 8.3.5 siga cuadrando.
+6. **Pareto del prototipo:** termina en 1 990 / 2 010 = 99.00 %; faltan 20 tickets
+   (otra fila fuera de la captura o un patrón excluido). Sin verificar.
+7. **Denominadores distintos en la misma pantalla:** las tarjetas son conteos; los
+   % por técnico de inválida y analizable van sobre E; los de la barra sobre A;
+   los del Pareto sobre P. No hay % sobre T en ningún lado del prototipo.
+
+### 11.8 Matriz por SP
+
+| SP | Fuentes identificadas | Lógica reutilizable | Información faltante | Estado |
+|---|---|---|---|---|
+| `usp_QARE_CalidadCaptura_KPIs` | `vw_CorreoQARECierre_Base` (`QARe_DescripcionSolucion`) | Población, fechas, default, filtros (2.2); cascada `S / I / A` | Nombres de columnas (9.10); lista de inválidas (9.4); `S` exacto (9.1, casi cerrado) | Diseñable en cuanto se apruebe 9.4 |
+| `usp_QARE_PatronesSolucion` | Misma vista; tipo, causa y evidencia como contexto | Pareto de `usp_CorreoQARE_CausaRaiz`; método de `motor.js` | Catálogo de patrones y frases (9.6); regla de incompleta (9.5); prioridad entre patrones e incompleta (9.9, 11.7.2) | Bloqueado por negocio; viabilidad medible con `diag_qare_patrones.sql` |
+| `usp_QARE_CalidadCaptura_Tecnicos` | Misma vista; `CatCuentaNoPersona`; `vw_Tickets` solo si se quiere el asignado | `Tecnico` = firma (2.2); `EsPersona` del SLA o `ExcluidosCuenta` de Análisis | Trato de cuentas no persona y proveedores (9.2); mínimo de tickets por fila; mismas reglas que KPIs y Patrones | Atribución resuelta; métricas dependen de los otros dos |
+| `usp_QARE_DetalleEvidencia` | Misma vista: las 12 columnas de origen existen (`esquema_bd`); contexto extra en `vw_Tickets` | Fechas y filtros; estados de los otros SP | "Regla detectada" sí o no (9.12); visibilidad de `EstadoDescripcionVisual`; `@Estado` / `@Clasificacion` | Columnas resueltas; cálculos dependen de los otros SP |
+
+### 11.9 Lo que no se puede determinar técnicamente
+
+- Qué literales forman la lista de inválidas (la medición ordena candidatos; la
+  frontera entre "basura" y "respuesta pobre" es criterio).
+- Si "copia del tipo" y "solo estado" (`RESUELTO`) son inválidas o incompletas.
+- El catálogo de patrones: nombres definitivos (el décimo está cortado:
+  "CANCELACION / CIERRE OPERA…"), qué frases pertenecen a cada uno y quién lo
+  mantiene.
+- El orden entre patrón e incompleta y entre dos patrones.
+- Si las cuentas no persona y de proveedor salen de la tabla por técnico.
+- El nivel de categoría del filtro y si se conservan `@C1` / `@Lideres`.
+- Los nombres de las columnas de `usp_QARE_CalidadCaptura_KPIs`.
+
+Si el prototipo de Daniela aparece en alguna base (11.4, 1c), la mayoría de estos
+puntos se leen de su código en vez de decidirse.
+
+### 11.10 Resumen ejecutivo
+
+1. **Descubierto sin preguntar a Daniela:** la población y su alcance, la
+   atribución del técnico (`Tecnico` = firma, igual que SLA), los encabezados de
+   sus cuatro capturas, la aritmética de su prototipo (sin información fuera de
+   inválidas; % sobre evaluados y sobre texto evaluable; barra excluyente), los
+   denominadores que ya usa QARE, que `Validacion` mide la categoría y no el
+   texto, cómo carga el ETL el texto, los dos precedentes para cuentas no persona
+   y que el detalle se puede armar entero con la vista actual.
+2. **Reglas que ya existen:** población y filtros QARE, regla del técnico, SI/SÍ,
+   denominadores por pregunta, exclusión de cuentas (SLA y Análisis, distintas),
+   Pareto, y el método de clasificación por frases de Análisis. **Ninguna** regla
+   de calidad del texto (pendiente de confirmar en los cuerpos completos de la
+   base).
+3. **Inferibles de los datos, no aprobadas:** sin información = texto vacío;
+   inválida = sin letras + no-respuesta + frases de formulario; no usar el largo
+   ni la copia de `SolucionUsuario` / `QA_MensajeError`; patrones por frases
+   normalizadas con prioridad.
+4. **No se resuelven con investigación técnica:** 11.9.
+5. **Falta para diseñar los cuatro SP:** correr en QA los seis diagnósticos (el de
+   objetos primero: puede encontrar el prototipo y cerrar casi todo); aprobar la
+   lista de inválidas, la regla de incompleta, el catálogo de patrones con su
+   orden y el trato de cuentas; y fijar los nombres de las tarjetas. El catálogo
+   requiere DDL con su propio script, rollback y aprobación.
