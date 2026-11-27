@@ -4,8 +4,14 @@
    SOLO LECTURA.
 
    Las reglas de inválida, incompleta y patrón viven en ese código
-   (sql/docs/PROPUESTA_qare_tecnicos.md, sección 9). Imprime cada cuerpo una
+   (sql/docs/PROPUESTA_qare_tecnicos.md, sección 12). Imprime cada cuerpo una
    fila por línea porque la cuadrícula de SSMS trunca OBJECT_DEFINITION.
+
+   Secciones 4-9 (2026-11-27): el diag de objetos encontró el prototipo en
+   Tickets_Proactivanet (vw_QARE_CalidadCaptura y los catálogos
+   CatQARE_RespuestaInvalida / CatQARE_PatronSolucion). Aquí se vuelca el
+   contenido de los catálogos y se mide lo que clasifica la vista en la
+   misma ventana que los demás diag (2026-10-29 a 2026-11-27).
    ========================================================================= */
 
 SET NOCOUNT ON;
@@ -49,3 +55,76 @@ JOIN sys.schemas AS s ON s.schema_id = t.schema_id
 JOIN sys.columns AS c ON c.object_id = t.object_id
 WHERE (t.name LIKE N'%QARE[_]%' AND t.name NOT LIKE N'%CorreoQARE%') OR t.name LIKE N'%Patron%'
 ORDER BY Tabla, c.column_id;
+
+DECLARE @Fi date = '20261029';
+DECLARE @Ff date = '20261127';
+
+-- 4. Catálogo de respuestas inválidas: la vista compara por igualdad exacta
+--    después de UPPER(LTRIM(RTRIM())).
+SELECT Seccion = N'4. CatQARE_RespuestaInvalida', *
+FROM dbo.CatQARE_RespuestaInvalida
+ORDER BY 2, 3;
+
+-- 5. Catálogo de patrones y reglas CALIDAD. CALIDAD compara por igualdad
+--    exacta; PATRON_SOLUCION por LIKE '%frase%'; gana Orden, luego la frase
+--    más larga.
+SELECT Seccion = N'5. CatQARE_PatronSolucion', *
+FROM dbo.CatQARE_PatronSolucion
+ORDER BY TipoClasificacion, Orden, IdRegla;
+
+SELECT Seccion = N'5b. Reglas por patron', TipoClasificacion, Patron, Activas = SUM(CASE WHEN Activo = 1 THEN 1 ELSE 0 END), Total = COUNT(*)
+FROM dbo.CatQARE_PatronSolucion
+GROUP BY TipoClasificacion, Patron
+ORDER BY TipoClasificacion, Patron;
+
+-- 6. La vista hace LEFT JOIN al catálogo de inválidas: un valor repetido
+--    (tras UPPER/TRIM) duplicaría el ticket en todos los SP.
+SELECT Seccion = N'6a. Valores invalidos repetidos', Valor = UPPER(LTRIM(RTRIM(Valor))), Filas = COUNT(*)
+FROM dbo.CatQARE_RespuestaInvalida
+WHERE Campo = 'QARe_DescripcionSolucion' AND Activo = 1
+GROUP BY UPPER(LTRIM(RTRIM(Valor)))
+HAVING COUNT(*) > 1;
+
+SELECT Seccion = N'6b. Filas de la vista vs tickets', Filas = COUNT(*), Tickets = COUNT(DISTINCT CodigoTicket)
+FROM dbo.vw_QARE_CalidadCaptura
+WHERE FechaFirmaSolucion >= @Fi AND FechaFirmaSolucion < DATEADD(DAY, 1, @Ff);
+
+-- 7. Lo que clasifica la vista en la ventana (comparable con diag_qare_kpis 5).
+SELECT Seccion = N'7a. Estado x tipo', EstadoDescripcion, TipoClasificacionRespuesta, Tickets = COUNT(DISTINCT CodigoTicket)
+FROM dbo.vw_QARE_CalidadCaptura
+WHERE FechaFirmaSolucion >= @Fi AND FechaFirmaSolucion < DATEADD(DAY, 1, @Ff)
+GROUP BY EstadoDescripcion, TipoClasificacionRespuesta
+ORDER BY EstadoDescripcion, TipoClasificacionRespuesta;
+
+SELECT Seccion = N'7b. ClasificacionRespuesta', TipoClasificacionRespuesta, ClasificacionRespuesta, Tickets = COUNT(DISTINCT CodigoTicket)
+FROM dbo.vw_QARE_CalidadCaptura
+WHERE FechaFirmaSolucion >= @Fi AND FechaFirmaSolucion < DATEADD(DAY, 1, @Ff)
+GROUP BY TipoClasificacionRespuesta, ClasificacionRespuesta
+ORDER BY TipoClasificacionRespuesta, Tickets DESC;
+
+-- 8. Textos más repetidos por resultado: qué deja pasar o atrapa cada regla.
+;WITH T AS (
+    SELECT Resultado = ISNULL(TipoClasificacionRespuesta, EstadoDescripcion),
+           Texto = LEFT(UPPER(LTRIM(RTRIM(QARe_DescripcionSolucion))), 120)
+    FROM dbo.vw_QARE_CalidadCaptura
+    WHERE FechaFirmaSolucion >= @Fi AND FechaFirmaSolucion < DATEADD(DAY, 1, @Ff)
+      AND EstadoDescripcion <> 'SIN INFORMACION QARE'
+), R AS (
+    SELECT Resultado, Texto, Tickets = COUNT(*),
+           Rk = ROW_NUMBER() OVER (PARTITION BY Resultado ORDER BY COUNT(*) DESC, Texto)
+    FROM T GROUP BY Resultado, Texto
+)
+SELECT Seccion = N'8. Textos por resultado', Resultado, Texto, Tickets
+FROM R WHERE Rk <= 40
+ORDER BY Resultado, Rk;
+
+-- 9. Caracteres invisibles (espacio de ancho cero, BOM): la igualdad exacta
+--    del catálogo no los quita. motor.js sí.
+SELECT Seccion = N'9. Textos con caracteres invisibles',
+       Tickets = COUNT(*),
+       ConAnchoCero = SUM(CASE WHEN QARe_DescripcionSolucion LIKE N'%[' + NCHAR(8203) + NCHAR(8204) + NCHAR(8205) + NCHAR(8206) + NCHAR(8207) + NCHAR(65279) + N']%' THEN 1 ELSE 0 END),
+       ConNBSP = SUM(CASE WHEN CHARINDEX(NCHAR(160), QARe_DescripcionSolucion) > 0 THEN 1 ELSE 0 END),
+       ConSalto = SUM(CASE WHEN QARe_DescripcionSolucion LIKE N'%[' + NCHAR(10) + NCHAR(13) + N']%' THEN 1 ELSE 0 END)
+FROM dbo.vw_QARE_CalidadCaptura
+WHERE FechaFirmaSolucion >= @Fi AND FechaFirmaSolucion < DATEADD(DAY, 1, @Ff)
+  AND QARe_DescripcionSolucion IS NOT NULL;
