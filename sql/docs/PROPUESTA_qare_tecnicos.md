@@ -833,8 +833,10 @@ Lo que esto cierra:
 5. **`LEFT JOIN` al catálogo de inválidas, bug confirmado:** `v` (Id 47) y `V`
    (Id 48) están activos y son iguales con `CI_AS`. La vista devuelve 9 375 filas
    para 9 374 tickets. Los tres SP de conteo usan `COUNT(DISTINCT)` y no se
-   enteran; `usp_QARE_DetalleEvidencia` sí muestra el ticket repetido. Basta con
-   desactivar una de las dos filas (cambio de datos, aprobación aparte).
+   enteran; `usp_QARE_DetalleEvidencia` sí muestra el ticket repetido.
+   **Corregido 2026-11-27 12:17** con `sql/45_qare_respuesta_invalida_v_duplicada.sql`
+   aplicado en QA: fila 47 (`v`) inactiva, 48 (`V`) activa; la vista queda en
+   9 374 filas = 9 374 tickets.
 6. **Filtros dispares entre SP y contra el mockup** (Período, Grupo, Categoría,
    Técnico):
 
@@ -1016,7 +1018,7 @@ El catálogo no dice si esas decisiones están aprobadas o son del prototipo.
 
 1. ~~Correr `diag_qare_tecnicos_prototipo.sql` completo~~ (hecho 12:07, 12.7).
 2. Llevar a Daniela la revisión de 12.4 como lista de correcciones al prototipo:
-   el bug `v`/`V` (5), la normalización antes de comparar (1-3), los filtros por SP
+   el bug `v`/`V` (5, ya corregido: avisarle), la normalización antes de comparar (1-3), los filtros por SP
    (6), las reglas desactivadas y `ERROR` (9, 10) y la incoherencia exacto/parcial
    (11, 12). Son cambios a sus objetos: no se tocan sin su acuerdo y aprobación.
 3. Medir el rendimiento de los cuatro SP con 15 y 90 días (7).
