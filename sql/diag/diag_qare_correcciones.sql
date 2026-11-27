@@ -22,7 +22,8 @@
    Ventana fija 2026-10-29 a 2026-11-27 (fin inclusivo), la de los diag
    anteriores. Correr en QA (Tickets_Proactivanet) con SSMS en cuadricula,
    resultados a archivo (.rpt). La salida trae textos de tickets: no
-   copiarla fuera de la red interna.
+   copiarla fuera de la red interna. Con resultados a archivo no se ve nada
+   hasta el final: el avance por lote sale en la pestana Mensajes.
 
    Literales no ASCII con NCHAR(): SSMS puede abrir el archivo como cp1252.
    ========================================================================= */
@@ -36,6 +37,9 @@ IF OBJECT_ID('tempdb..#K') IS NOT NULL DROP TABLE #K;
 IF OBJECT_ID('tempdb..#D') IS NOT NULL DROP TABLE #D;
 IF OBJECT_ID('tempdb..#D2') IS NOT NULL DROP TABLE #D2;
 IF OBJECT_ID('tempdb..#D3') IS NOT NULL DROP TABLE #D3;
+IF OBJECT_ID('tempdb..#Q') IS NOT NULL DROP TABLE #Q;
+IF OBJECT_ID('tempdb..#B') IS NOT NULL DROP TABLE #B;
+IF OBJECT_ID('tempdb..#H') IS NOT NULL DROP TABLE #H;
 
 DECLARE @Fi date = '20261029';
 DECLARE @Ff date = '20261127';
@@ -46,6 +50,24 @@ DECLARE @Ff date = '20261127';
 /* TxtB: llave de union entre #T y las tablas de la seccion 2. Binaria para
    que 'Error' y 'ERROR', o un texto con y sin espacio de ancho cero, no se
    fundan en uno; la clasificacion compara con su propia intercalacion. */
+/* Cada vista se lee UNA vez a su propia temporal y luego se unen: un
+   OUTER APPLY correlacionado contra vw_CorreoQARECierre_Base (vista, no
+   tabla) la reevaluaba por ticket y el lote no terminaba en QA. */
+RAISERROR (N'B. leyendo vw_QARE_CalidadCaptura...', 0, 1) WITH NOWAIT;
+SELECT q.CodigoTicket, q.FechaFirmaSolucion, q.FirmaSolucion, q.Grupo, q.Categoria,
+       q.QARe_DescripcionSolucion, q.EstadoDescripcion, q.TipoClasificacionRespuesta, q.ClasificacionRespuesta,
+       q.IdReglaClasificacion, q.FraseClasificacion, q.QARe_TipoSolucion, q.QARe_Causa
+INTO #Q
+FROM dbo.vw_QARE_CalidadCaptura AS q
+WHERE q.FechaFirmaSolucion >= @Fi AND q.FechaFirmaSolucion < DATEADD(DAY, 1, @Ff);
+
+RAISERROR (N'B. leyendo vw_CorreoQARECierre_Base...', 0, 1) WITH NOWAIT;
+SELECT x.CodigoTicket, x.Tipo, x.Titulo, x.QARe_Evidencia, x.SolucionUsuario, x.QA_MensajeError,
+       Rn = ROW_NUMBER() OVER (PARTITION BY x.CodigoTicket ORDER BY (SELECT NULL))
+INTO #B
+FROM dbo.vw_CorreoQARECierre_Base AS x
+WHERE x.FechaFirmaSolucion >= @Fi AND x.FechaFirmaSolucion < DATEADD(DAY, 1, @Ff);
+
 SELECT q.CodigoTicket, q.FechaFirmaSolucion, q.FirmaSolucion, q.Grupo, q.Categoria,
        Txt = q.QARe_DescripcionSolucion,
        TxtB = CAST(q.QARe_DescripcionSolucion AS nvarchar(4000)) COLLATE Latin1_General_BIN2,
@@ -54,16 +76,18 @@ SELECT q.CodigoTicket, q.FechaFirmaSolucion, q.FirmaSolucion, q.Grupo, q.Categor
        q.QARe_TipoSolucion, q.QARe_Causa,
        TipoTicket = b.Tipo, b.Titulo, b.QARe_Evidencia, b.SolucionUsuario, b.QA_MensajeError
 INTO #T
-FROM dbo.vw_QARE_CalidadCaptura AS q
-OUTER APPLY (SELECT TOP (1) x.Tipo, x.Titulo, x.QARe_Evidencia, x.SolucionUsuario, x.QA_MensajeError
-             FROM dbo.vw_CorreoQARECierre_Base AS x
-             WHERE x.CodigoTicket = q.CodigoTicket) AS b
-WHERE q.FechaFirmaSolucion >= @Fi AND q.FechaFirmaSolucion < DATEADD(DAY, 1, @Ff);
+FROM #Q AS q
+LEFT JOIN #B AS b ON b.CodigoTicket = q.CodigoTicket AND b.Rn = 1;
 
 SELECT Seccion = N'B. Base', Filas = COUNT(*), Tickets = COUNT(DISTINCT CodigoTicket),
-       TextoMas4000 = SUM(CASE WHEN LEN(Txt) > 4000 THEN 1 ELSE 0 END)
+       TextoMas4000 = SUM(CASE WHEN LEN(Txt) > 4000 THEN 1 ELSE 0 END),
+       SinFilaEnBase = (SELECT COUNT(*) FROM #Q AS q WHERE NOT EXISTS (SELECT 1 FROM #B AS b WHERE b.CodigoTicket = q.CodigoTicket)),
+       BaseDuplicada = (SELECT COUNT(*) FROM #B WHERE Rn > 1)
 FROM #T;
+DROP TABLE #Q; DROP TABLE #B;
 GO
+DECLARE @Avance nvarchar(40) = CONVERT(nvarchar(30), SYSDATETIME(), 120);
+RAISERROR (N'lote 2 de 12 inicia %s', 0, 1, @Avance) WITH NOWAIT;
 
 /* ================================================================ 0
    Intercalacion. En LocalDB (SQL 2025, sin datos de QA) se vio que
@@ -106,6 +130,8 @@ SELECT Seccion = N'0c. Acento como la vista',
        LikeAcento = CASE WHEN N'FALLA DE NAVEGACI' + NCHAR(211) + N'N' COLLATE DATABASE_DEFAULT LIKE N'%NAVEGACION%' THEN 1 ELSE 0 END,
        LikeGuionBajoComodin = CASE WHEN N'ALTAXSAP' COLLATE DATABASE_DEFAULT LIKE N'%ALTA_SAP%' THEN 1 ELSE 0 END;
 GO
+DECLARE @Avance nvarchar(40) = CONVERT(nvarchar(30), SYSDATETIME(), 120);
+RAISERROR (N'lote 3 de 12 inicia %s', 0, 1, @Avance) WITH NOWAIT;
 
 /* ================================================================ 1
    Respuestas frecuentes sin patron. Familias por contenido (sin acentos,
@@ -224,6 +250,8 @@ WHERE r.Valor COLLATE Latin1_General_CI_AI LIKE N'%ERROR%' OR r.Valor COLLATE La
    OR r.Valor COLLATE Latin1_General_CI_AI LIKE N'%NAVEG%' OR r.Valor COLLATE Latin1_General_CI_AI LIKE N'%PRECIO%'
    OR r.Valor COLLATE Latin1_General_CI_AI LIKE N'%SAP%';
 GO
+DECLARE @Avance nvarchar(40) = CONVERT(nvarchar(30), SYSDATETIME(), 120);
+RAISERROR (N'lote 4 de 12 inicia %s', 0, 1, @Avance) WITH NOWAIT;
 
 /* ================================================================ 2
    Normalizacion. #N tiene una clave por texto distinto y por nivel:
@@ -502,6 +530,8 @@ WHERE a.Activo = 1 AND b.Activo = 1
   AND a.TipoClasificacion = 'PATRON_SOLUCION' AND b.TipoClasificacion = 'PATRON_SOLUCION'
 ORDER BY a.Orden, a.PalabraClave;
 GO
+DECLARE @Avance nvarchar(40) = CONVERT(nvarchar(30), SYSDATETIME(), 120);
+RAISERROR (N'lote 5 de 12 inicia %s', 0, 1, @Avance) WITH NOWAIT;
 
 /* ================================================================ 3
    Reglas existentes. Clasificacion de la vista, sin cambios; #FT trae la
@@ -673,6 +703,8 @@ GROUP BY LEFT(Clave, 120), EstadoDescripcion, Tipo, Clasif, IdReglaClasificacion
 HAVING COUNT(*) >= 2
 ORDER BY Tickets DESC;
 GO
+DECLARE @Avance nvarchar(40) = CONVERT(nvarchar(30), SYSDATETIME(), 120);
+RAISERROR (N'lote 6 de 12 inicia %s', 0, 1, @Avance) WITH NOWAIT;
 
 /* ================================================================ 4
    Consistencia entre los cuatro SP. */
@@ -711,6 +743,20 @@ ORDER BY Objeto, p.parameter_id;
 /* 4c. Hechos de la poblacion de la vista en TODO el historial: los SP con
    fechas NULL leen todo, incluidos tickets sin FechaFirmaSolucion, que
    cualquier filtro de fecha deja fuera. */
+/* 4c y 4d salen de una sola lectura del historial completo: la vista no
+   tiene indice propio y cada lectura recorre vw_CorreoQARECierre_Base.
+   4d. Limite final: tickets firmados el ultimo dia despues de las 00:00.
+   Un filtro "<= @FechaFin" sobre datetime2 los deja fuera; "< @FechaFin + 1"
+   los incluye. Se comparan con lo que devuelve cada SP en 4e. */
+DECLARE @Fi date = '20261029';
+DECLARE @Ff date = '20261127';
+RAISERROR (N'4c. leyendo vista completa (todo el historial)...', 0, 1) WITH NOWAIT;
+SELECT v.CodigoTicket, v.FechaFirmaSolucion, v.FirmaSolucion, v.Grupo, v.Categoria,
+       EsCuenta = CASE WHEN EXISTS (SELECT 1 FROM dbo.CatCuentaNoPersona AS c
+                                    WHERE c.Habilitado = 1 AND c.Cuenta = v.FirmaSolucion) THEN 1 ELSE 0 END
+INTO #H
+FROM dbo.vw_QARE_CalidadCaptura AS v;
+
 SELECT Seccion = N'4c. Vista completa',
        Filas = COUNT(*), Tickets = COUNT(DISTINCT CodigoTicket),
        SinFechaFirma = SUM(CASE WHEN FechaFirmaSolucion IS NULL THEN 1 ELSE 0 END),
@@ -720,39 +766,35 @@ SELECT Seccion = N'4c. Vista completa',
        SinCategoria = SUM(CASE WHEN Categoria IS NULL THEN 1 ELSE 0 END),
        PrimeraFirma = MIN(FechaFirmaSolucion), UltimaFirma = MAX(FechaFirmaSolucion),
        ConHora = SUM(CASE WHEN CAST(FechaFirmaSolucion AS time) <> '00:00' THEN 1 ELSE 0 END),
-       Cuentas = (SELECT COUNT(*) FROM dbo.vw_QARE_CalidadCaptura AS v
-                  WHERE EXISTS (SELECT 1 FROM dbo.CatCuentaNoPersona AS c WHERE c.Habilitado = 1 AND c.Cuenta = v.FirmaSolucion))
-FROM dbo.vw_QARE_CalidadCaptura;
+       Cuentas = SUM(EsCuenta)
+FROM #H;
 
-/* 4d. Limite final: tickets firmados el ultimo dia despues de las 00:00.
-   Un filtro "<= @FechaFin" sobre datetime2 los deja fuera; "< @FechaFin + 1"
-   los incluye. Se comparan con lo que devuelve cada SP en 4e. */
-DECLARE @Fi date = '20261029';
-DECLARE @Ff date = '20261127';
 SELECT Seccion = N'4d. Limites de fecha',
        Inclusivo = SUM(CASE WHEN FechaFirmaSolucion >= @Fi AND FechaFirmaSolucion < DATEADD(DAY, 1, @Ff) THEN 1 ELSE 0 END),
        MenorIgualFin = SUM(CASE WHEN FechaFirmaSolucion >= @Fi AND FechaFirmaSolucion <= @Ff THEN 1 ELSE 0 END),
        PorFechaCast = SUM(CASE WHEN CAST(FechaFirmaSolucion AS date) BETWEEN @Fi AND @Ff THEN 1 ELSE 0 END),
        UltimoDia = SUM(CASE WHEN CAST(FechaFirmaSolucion AS date) = @Ff THEN 1 ELSE 0 END),
        PrimerDia = SUM(CASE WHEN CAST(FechaFirmaSolucion AS date) = @Fi THEN 1 ELSE 0 END)
-FROM dbo.vw_QARE_CalidadCaptura;
+FROM #H;
+DROP TABLE #H;
 
--- 4d2. Totales esperados en la ventana, calculados directo de la vista (COUNT DISTINCT como los SP).
+-- 4d2. Totales esperados en la ventana (COUNT DISTINCT como los SP), desde #T = la vista en la ventana.
 SELECT Seccion = N'4d2. Esperado ventana',
-       Totales = COUNT(DISTINCT CodigoTicket),
-       SinInfo = COUNT(DISTINCT CASE WHEN EstadoDescripcion = 'SIN INFORMACION QARE' THEN CodigoTicket END),
-       Evaluados = COUNT(DISTINCT CASE WHEN EstadoDescripcion <> 'SIN INFORMACION QARE' THEN CodigoTicket END),
-       NoEvaluables = COUNT(DISTINCT CASE WHEN EstadoDescripcion = 'NO EVALUABLE' THEN CodigoTicket END),
-       TextoEvaluable = COUNT(DISTINCT CASE WHEN EstadoDescripcion = 'TEXTO EVALUABLE' THEN CodigoTicket END),
-       Patron = COUNT(DISTINCT CASE WHEN TipoClasificacionRespuesta = 'PATRON_SOLUCION' THEN CodigoTicket END),
-       Calidad = COUNT(DISTINCT CASE WHEN TipoClasificacionRespuesta = 'CALIDAD' THEN CodigoTicket END),
-       SinPatron = COUNT(DISTINCT CASE WHEN TipoClasificacionRespuesta = 'SIN PATRON' THEN CodigoTicket END),
-       ConFirma = COUNT(DISTINCT CASE WHEN FirmaSolucion IS NOT NULL THEN CodigoTicket END),
-       DeCuentasNoPersona = COUNT(DISTINCT CASE WHEN c.Cuenta IS NOT NULL THEN CodigoTicket END)
-FROM dbo.vw_QARE_CalidadCaptura AS v
-LEFT JOIN dbo.CatCuentaNoPersona AS c ON c.Habilitado = 1 AND c.Cuenta = v.FirmaSolucion
-WHERE FechaFirmaSolucion >= @Fi AND FechaFirmaSolucion < DATEADD(DAY, 1, @Ff);
+       Totales = COUNT(DISTINCT v.CodigoTicket),
+       SinInfo = COUNT(DISTINCT CASE WHEN v.EstadoDescripcion = 'SIN INFORMACION QARE' THEN v.CodigoTicket END),
+       Evaluados = COUNT(DISTINCT CASE WHEN v.EstadoDescripcion <> 'SIN INFORMACION QARE' THEN v.CodigoTicket END),
+       NoEvaluables = COUNT(DISTINCT CASE WHEN v.EstadoDescripcion = 'NO EVALUABLE' THEN v.CodigoTicket END),
+       TextoEvaluable = COUNT(DISTINCT CASE WHEN v.EstadoDescripcion = 'TEXTO EVALUABLE' THEN v.CodigoTicket END),
+       Patron = COUNT(DISTINCT CASE WHEN v.Tipo = 'PATRON_SOLUCION' THEN v.CodigoTicket END),
+       Calidad = COUNT(DISTINCT CASE WHEN v.Tipo = 'CALIDAD' THEN v.CodigoTicket END),
+       SinPatron = COUNT(DISTINCT CASE WHEN v.Tipo = 'SIN PATRON' THEN v.CodigoTicket END),
+       ConFirma = COUNT(DISTINCT CASE WHEN v.FirmaSolucion IS NOT NULL THEN v.CodigoTicket END),
+       DeCuentasNoPersona = COUNT(DISTINCT CASE WHEN c.Cuenta IS NOT NULL THEN v.CodigoTicket END)
+FROM #T AS v
+LEFT JOIN dbo.CatCuentaNoPersona AS c ON c.Habilitado = 1 AND c.Cuenta = v.FirmaSolucion;
 GO
+DECLARE @Avance nvarchar(40) = CONVERT(nvarchar(30), SYSDATETIME(), 120);
+RAISERROR (N'lote 7 de 12 inicia %s', 0, 1, @Avance) WITH NOWAIT;
 
 /* 4e. Lo que devuelve cada SP para la misma ventana. KPIs y Detalle se
    capturan con INSERT ... EXEC en tablas temporales para cuadrarlos; Tecnicos
@@ -767,6 +809,8 @@ CREATE TABLE #K (TicketsTotales int, TicketsSinInformacionQARE int, TicketsEvalu
 INSERT #K EXEC dbo.usp_QARE_CalidadCaptura_KPIs @FechaInicio = @Fi, @FechaFin = @Ff;
 SELECT Seccion = N'4e. KPIs ventana', * FROM #K;
 GO
+DECLARE @Avance nvarchar(40) = CONVERT(nvarchar(30), SYSDATETIME(), 120);
+RAISERROR (N'lote 8 de 12 inicia %s', 0, 1, @Avance) WITH NOWAIT;
 
 DECLARE @Fi date = '20261029';
 DECLARE @Ff date = '20261127';
@@ -810,17 +854,23 @@ CROSS JOIN (SELECT Tickets = COUNT(DISTINCT CodigoTicket),
                    Analizable = COUNT(DISTINCT CASE WHEN EstadoDescripcionVisual = 'RESPUESTA ANALIZABLE' THEN CodigoTicket END)
             FROM #D) AS d;
 GO
+DECLARE @Avance nvarchar(40) = CONVERT(nvarchar(30), SYSDATETIME(), 120);
+RAISERROR (N'lote 9 de 12 inicia %s', 0, 1, @Avance) WITH NOWAIT;
 
 DECLARE @Fi date = '20261029';
 DECLARE @Ff date = '20261127';
 -- 4f. Tecnicos y Patrones tal cual, misma ventana y sin filtros.
 EXEC dbo.usp_QARE_CalidadCaptura_Tecnicos @FechaInicio = @Fi, @FechaFin = @Ff;
 GO
+DECLARE @Avance nvarchar(40) = CONVERT(nvarchar(30), SYSDATETIME(), 120);
+RAISERROR (N'lote 10 de 12 inicia %s', 0, 1, @Avance) WITH NOWAIT;
 
 DECLARE @Fi date = '20261029';
 DECLARE @Ff date = '20261127';
 EXEC dbo.usp_QARE_PatronesSolucion @FechaInicio = @Fi, @FechaFin = @Ff;
 GO
+DECLARE @Avance nvarchar(40) = CONVERT(nvarchar(30), SYSDATETIME(), 120);
+RAISERROR (N'lote 11 de 12 inicia %s', 0, 1, @Avance) WITH NOWAIT;
 
 /* 4g. Filtro de Grupo: el grupo con mas tickets en la ventana. KPIs no
    recibe @Grupo; Tecnicos y Patrones si. Se muestra lo esperado de la
@@ -845,6 +895,8 @@ SELECT Seccion = N'4g. Grupo pasa por VARCHAR sin perdida', Igual = CASE WHEN CA
 -- 4g2. Patrones con el grupo (la barra, tercer result set, debe dar TextoEvaluable/Patron/Calidad/SinPatron de 4g).
 EXEC dbo.usp_QARE_PatronesSolucion @FechaInicio = @Fi, @FechaFin = @Ff, @Grupo = @Gv;
 GO
+DECLARE @Avance nvarchar(40) = CONVERT(nvarchar(30), SYSDATETIME(), 120);
+RAISERROR (N'lote 12 de 12 inicia %s', 0, 1, @Avance) WITH NOWAIT;
 
 /* 4h. Nombres de grupo, firma y categoria que no sobreviven a VARCHAR
    (los parametros de los SP son VARCHAR; la columna es NVARCHAR): esos
